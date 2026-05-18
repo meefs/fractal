@@ -1,0 +1,92 @@
+# AGENTS.md
+
+Fractal is an interactive local coding-agent CLI built around PredictRLM. Each
+user turn is one RLM call over a `predict_rlm.Workspace`, with the repo mounted
+in the PredictRLM sandbox and workspace edits synced back after generated code
+blocks run.
+
+## Current Shape
+
+- CLI entry point: `fractal` -> `fractal.cli:main`.
+- Main REPL: `src/fractal/cli.py`.
+- Agent wrapper: `src/fractal/agent/service.py`.
+- RLM signature: `src/fractal/agent/signature.py`.
+- PredictRLM skill instructions: `src/fractal/agent/skills.py`.
+- Session persistence: `src/fractal/session.py`.
+- Tests: `tests/test_smoke.py`.
+
+The current implementation is intentionally thin. It stores a capped turn list
+in `.fractal/session.json`, passes a plain session summary into PredictRLM, and
+trusts the model-returned `changed_files` field. The Linear roadmap tracks the
+work needed to turn this into a reliable daily-use coding agent.
+
+## Local Commands
+
+This repo uses `uv` and depends on a local editable checkout of
+`../predict-rlm`.
+
+```bash
+uv run fractal --help
+uv run pytest
+```
+
+The RLM-facing imports require `predict_rlm.Workspace` from the local
+`/Users/emile/git/predict-rlm` checkout, currently expected on a branch that
+exports workspace support.
+
+## Product Direction
+
+Fractal's MVP is a local interactive coding-agent CLI, not a broad cloud agent
+platform. The table-stakes MVP capabilities tracked in Linear are:
+
+- Durable structured session state.
+- Deterministic context packet generation from session state.
+- PredictRLM run trace ingestion and persistence.
+- Safe host command execution for tests, builds, linters, and inspection.
+- Command execution policy and safety boundaries.
+- Reliable changed-file detection from workspace state.
+- Project context and instruction-file loading.
+- Standard agent skill support at the harness level.
+- Interactive configuration and auth setup.
+- Provider/auth abstraction for API keys and future Codex-style auth.
+- Minimal turn observability and user-facing run summaries.
+- Failed-turn persistence and recovery context.
+
+Known post-MVP gaps versus current coding agents include git-native change
+lifecycle support: exact diffs per turn, checkpoints, rollback, dirty-worktree
+detection, branch/worktree awareness, and optional commit generation.
+
+## Engineering Guidelines
+
+- Keep changes narrowly scoped. This repo is small; avoid introducing broad
+  abstractions before the behavior needs them.
+- Prefer host-side truth over model-reported truth for state, files changed,
+  commands run, verification status, and errors.
+- Preserve user work. Fractal should not overwrite unrelated edits or hide dirty
+  workspace state.
+- Persist enough state to recover from failures. A failed agent turn should
+  leave useful session records, error details, changed files, and verification
+  context.
+- Do not put `.fractal` session data into the PredictRLM workspace context; the
+  agent service currently excludes it from `Workspace`.
+- Keep CLI output concise but operationally useful: status, changed files,
+  commands run, verification result, and next recovery step when blocked.
+
+## Testing Guidance
+
+- Run `uv run pytest` for normal validation.
+- Tests that require `predict_rlm.Workspace` are written to skip when the local
+  predict-rlm checkout does not export it.
+- Add focused tests for session migration/persistence, context building, command
+  policy, changed-file detection, and failure handling as those features land.
+
+## Current Caveats
+
+- There is no host command execution tool yet.
+- There is no robust approval/sandbox policy yet.
+- Session state is still a shallow capped transcript.
+- Context building is just a string summary.
+- Changed files are currently coerced from model output.
+- There is no git checkpoint, diff review, or rollback layer yet.
+- There is no MCP/plugin system beyond the planned standard skill loader.
+
