@@ -68,7 +68,12 @@ exact prior REPL reasoning, code, outputs, tool calls, or predict calls, inspect
             )
         )
 
-        response: str = dspy.OutputField(desc="Concise response to show in the CLI.")
+        response: str = dspy.OutputField(
+            desc=(
+                "Concise Markdown-formatted response to show in the CLI. Use "
+                "Markdown for bullets, code spans, and short code blocks when helpful."
+            )
+        )
         changed_files: list[str] = dspy.OutputField(
             desc="Relative paths of files changed in /sandbox/workspace."
         )

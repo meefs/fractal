@@ -8,11 +8,13 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.styles import Style
 from rich.console import Console, Group
+from rich.markdown import Markdown
 from rich.padding import Padding
 from rich.panel import Panel
 from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
+from rich.theme import Theme
 
 from fractal.agent.schema import FractalResult
 from fractal.session import SessionSummary, SummaryTurn
@@ -25,6 +27,23 @@ PROMPT_STYLE = Style.from_dict(
         "session": "ansibrightblack",
     }
 )
+MARKDOWN_STYLE_OVERRIDES = {
+        # Rich defaults inline code to "cyan on black", which reads as a
+        # highlight block inside Fractal's already framed response panel.
+        # Keep Markdown emphasis visible without adding another background.
+        "markdown.code": "bold cyan",
+        "markdown.code_block": "cyan",
+        "markdown.strong": "bold",
+        "markdown.item.bullet": "bright_black",
+        "markdown.list": "none",
+    }
+MARKDOWN_THEME = Theme(MARKDOWN_STYLE_OVERRIDES)
+
+
+class FractalMarkdown(Markdown):
+    def __rich_console__(self, console: Console, options: object) -> object:
+        with console.use_theme(MARKDOWN_THEME):
+            yield from super().__rich_console__(console, options)
 
 
 class SessionLike(Protocol):
@@ -245,7 +264,7 @@ def render_user_message(message: str) -> Panel:
 
 
 def render_agent_message(turn: SummaryTurn, *, pending: bool = False) -> Panel:
-    body: str | Text
+    body: str | Text | Markdown
     style = "on #23262e"
     border_style = "white"
     if pending or turn.agent is None:
@@ -255,7 +274,7 @@ def render_agent_message(turn: SummaryTurn, *, pending: bool = False) -> Panel:
         style = "on #2a1d22"
         border_style = "red"
     else:
-        body = turn.agent.response
+        body = FractalMarkdown(turn.agent.response)
 
     return Panel(
         body,

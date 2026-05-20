@@ -48,16 +48,20 @@ class FakeRuntime:
         if self.fail:
             self.session.add_agent_failure("model failed", turn_id=turn_id)
             raise RuntimeError("model failed")
+        response = self._response(user_message)
         self.session.add_agent_response(
-            f"response to {user_message}",
+            response,
             [],
             trace=self._trace() if self.include_trace else None,
             turn_id=turn_id,
         )
         return FractalResult(
-            response=f"response to {user_message}",
+            response=response,
             trace=self._trace() if self.include_trace else None,
         )
+
+    def _response(self, user_message: str) -> str:
+        return f"response to {user_message}"
 
     def _trace(self) -> object:
         from predict_rlm.trace import IterationStep, RunTrace
@@ -134,6 +138,29 @@ def test_terminal_tui_renders_summary_as_native_output(tmp_path: Path) -> None:
     assert "hello fractal" in text
     assert "hello human" in text
     assert "─" in text
+
+
+def test_terminal_tui_renders_final_response_as_markdown(tmp_path: Path) -> None:
+    from rich.markdown import Markdown
+
+    from fractal.tui.app import FractalMarkdown
+    from fractal.tui.app import MARKDOWN_STYLE_OVERRIDES
+    from fractal.tui.app import render_agent_message
+
+    runtime = FakeRuntime(tmp_path)
+    turn_id = runtime.session.add_user_message("format response")
+    runtime.session.add_agent_response(
+        "**Done**\n\n- updated `README.md`",
+        [],
+        turn_id=turn_id,
+    )
+    turn = runtime.session.turns[-1]
+
+    panel = render_agent_message(turn)
+
+    assert isinstance(panel.renderable, Markdown)
+    assert isinstance(panel.renderable, FractalMarkdown)
+    assert MARKDOWN_STYLE_OVERRIDES["markdown.code"] == "bold cyan"
 
 
 def test_terminal_tui_renders_compact_trace_summary(tmp_path: Path) -> None:
