@@ -6,7 +6,9 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2",
+    "prompt-toolkit>=3.0",
     "predict-rlm",
+    "rich>=13",
 ]
 
 [project.scripts]

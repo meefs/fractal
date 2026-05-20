@@ -26,6 +26,7 @@ def test_cli_parser_defaults_to_cwd() -> None:
 
     assert args.workspace == Path.cwd()
     assert args.max_iterations == 30
+    assert args.quiet is False
 
 
 def test_signature_fields() -> None:
