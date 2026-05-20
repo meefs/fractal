@@ -5,7 +5,10 @@ from pathlib import Path
 from typing import Protocol, TextIO
 
 from prompt_toolkit import PromptSession
+from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import HTML
+from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.styles import Style
 from rich.console import Console, Group
 from rich.markdown import Markdown
@@ -27,16 +30,21 @@ PROMPT_STYLE = Style.from_dict(
         "session": "ansibrightblack",
     }
 )
+SLASH_COMMANDS = {
+    "/resume": "Resume an existing session by id",
+    "/exit": "Exit Fractal",
+    "/quit": "Exit Fractal",
+}
 MARKDOWN_STYLE_OVERRIDES = {
-        # Rich defaults inline code to "cyan on black", which reads as a
-        # highlight block inside Fractal's already framed response panel.
-        # Keep Markdown emphasis visible without adding another background.
-        "markdown.code": "bold cyan",
-        "markdown.code_block": "cyan",
-        "markdown.strong": "bold",
-        "markdown.item.bullet": "bright_black",
-        "markdown.list": "none",
-    }
+    # Rich defaults inline code to "cyan on black", which reads as a
+    # highlight block inside Fractal's already framed response panel.
+    # Keep Markdown emphasis visible without adding another background.
+    "markdown.code": "bold cyan",
+    "markdown.code_block": "cyan",
+    "markdown.strong": "bold",
+    "markdown.item.bullet": "bright_black",
+    "markdown.list": "none",
+}
 MARKDOWN_THEME = Theme(MARKDOWN_STYLE_OVERRIDES)
 
 
@@ -44,6 +52,40 @@ class FractalMarkdown(Markdown):
     def __rich_console__(self, console: Console, options: object) -> object:
         with console.use_theme(MARKDOWN_THEME):
             yield from super().__rich_console__(console, options)
+
+
+class SlashCommandCompleter(Completer):
+    def get_completions(self, document: Document, complete_event: object) -> object:
+        text = document.text_before_cursor
+        if not text.startswith("/") or " " in text:
+            return
+        for command, description in SLASH_COMMANDS.items():
+            if command.startswith(text):
+                yield Completion(
+                    command,
+                    start_position=-len(text),
+                    display_meta=description,
+                )
+
+
+def slash_command_key_bindings() -> KeyBindings:
+    bindings = KeyBindings()
+
+    @bindings.add("enter")
+    def _(event: object) -> None:
+        buffer = event.current_buffer
+        complete_state = buffer.complete_state
+        completion = (
+            complete_state.current_completion if complete_state is not None else None
+        )
+        if completion is not None:
+            buffer.apply_completion(completion)
+            if not buffer.document.text_before_cursor.endswith(" "):
+                buffer.insert_text(" ")
+            return
+        buffer.validate_and_handle()
+
+    return bindings
 
 
 class SessionLike(Protocol):
@@ -59,6 +101,8 @@ class FractalRuntimeLike(Protocol):
 
     @property
     def session(self) -> SessionLike: ...
+
+    def resume(self, session_id: str) -> None: ...
 
     async def submit(self, user_message: str, **kwargs: object) -> FractalResult: ...
 
@@ -77,7 +121,12 @@ class TerminalFractalApp:
         self.runtime = runtime
         self.console = console or Console()
         self.input_stream = input_stream
-        self.prompt_session = prompt_session or PromptSession(style=PROMPT_STYLE)
+        self.prompt_session = prompt_session or PromptSession(
+            style=PROMPT_STYLE,
+            completer=SlashCommandCompleter(),
+            complete_while_typing=True,
+            key_bindings=slash_command_key_bindings(),
+        )
         self._rendered_turn_ids: set[str] = set()
         self._pending_turn_ids: set[str] = set()
         self._prompt_echo_turn_ids: set[str] = set()
@@ -91,6 +140,8 @@ class TerminalFractalApp:
             if message is None or message in {"/exit", "/quit"}:
                 return
             if not message:
+                continue
+            if self.handle_slash_command(message):
                 continue
 
             def mark_pending() -> None:
@@ -127,6 +178,26 @@ class TerminalFractalApp:
         )
         self.console.print(Text("Type /exit or /quit to quit.", style="dim"))
 
+    def handle_slash_command(self, message: str) -> bool:
+        command, _, rest = message.partition(" ")
+        if command != "/resume":
+            return False
+        session_id = rest.strip()
+        if not session_id:
+            self.console.print(Text("usage: /resume <session-id>", style="yellow"))
+            return True
+        try:
+            self.runtime.resume(session_id)
+        except FileNotFoundError as exc:
+            self.console.print(Text(str(exc), style="red"))
+            return True
+        self._rendered_turn_ids.clear()
+        self._pending_turn_ids.clear()
+        self._prompt_echo_turn_ids.clear()
+        self.console.print(Text(f"resumed session {self.runtime.session_id}", style="dim"))
+        self.render_new_turns()
+        return True
+
     def render_new_turns(self) -> None:
         for turn in self.runtime.session.summary_model.turns:
             if turn.turn_id in self._rendered_turn_ids:
@@ -149,7 +220,6 @@ class TerminalFractalApp:
             self._rendered_turn_ids.add(turn.turn_id)
 
     def render_turn(self, turn: SummaryTurn, *, pending: bool = False) -> None:
-        self.console.print(Rule(style="dim"))
         self.console.print(render_user_message(turn.user.message))
         self.console.print(Rule(style="dim"))
         self.console.print(render_agent_message(turn, pending=pending))
@@ -161,6 +231,7 @@ class TerminalFractalApp:
             )
 
     async def read_message(self) -> str | None:
+        self.console.print()
         if self.input_stream is None:
             try:
                 message = await self.prompt_session.prompt_async(
@@ -180,7 +251,7 @@ class TerminalFractalApp:
 
     def _readline(self) -> str:
         assert self.input_stream is not None
-        self.console.print("fractal> ", end="")
+        self.console.print(render_prompt_label(), end="")
         line = self.input_stream.readline()
         if line == "":
             raise EOFError
@@ -252,15 +323,12 @@ def render_reasoning(reasoning: str) -> Padding:
     return Padding(table, (0, 0, 0, 2))
 
 
-def render_user_message(message: str) -> Panel:
-    return Panel(
-        message,
-        title="You",
-        title_align="left",
-        border_style="bright_black",
-        style="on #1a1d23",
-        padding=(1, 2),
-    )
+def render_user_message(message: str) -> Group:
+    return Group("", Text.assemble(render_prompt_label(), message))
+
+
+def render_prompt_label() -> Text:
+    return Text.assemble(("fractal", "bold cyan"), ("›", "bright_black"), " ")
 
 
 def render_agent_message(turn: SummaryTurn, *, pending: bool = False) -> Panel:

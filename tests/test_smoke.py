@@ -27,6 +27,15 @@ def test_cli_parser_defaults_to_cwd() -> None:
     assert args.workspace == Path.cwd()
     assert args.max_iterations == 30
     assert args.quiet is False
+    assert args.resume is None
+
+
+def test_cli_parser_accepts_resume_session_id() -> None:
+    from fractal.cli import build_parser
+
+    args = build_parser().parse_args(["--resume", "session-123"])
+
+    assert args.resume == "session-123"
 
 
 def test_signature_fields() -> None:

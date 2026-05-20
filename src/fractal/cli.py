@@ -21,6 +21,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--max-iterations", type=int, default=30)
     parser.add_argument(
+        "--resume",
+        metavar="SESSION_ID",
+        help="resume an existing workspace-local session by id",
+    )
+    parser.add_argument(
         "--quiet", action="store_true", help="reserved for quieter terminal output"
     )
     parser.add_argument(
@@ -41,6 +46,7 @@ def run_tui(args: argparse.Namespace) -> int:
         max_iterations=args.max_iterations,
         verbose=False,
         debug=args.debug,
+        session_id=args.resume,
     )
     asyncio.run(TerminalFractalApp(runtime).run())
     return 0

@@ -9,7 +9,7 @@ from predict_rlm.trace import extract_trace_from_exc
 
 from .agent.schema import FractalResult
 from .agent.service import FractalAgent, coerce_trace
-from .session import FractalSession, SessionHistoryTurn, SummaryTurn
+from .session import FractalSession, SessionHistoryTurn, SummaryTurn, session_path
 
 
 class FractalAgentLike(Protocol):
@@ -46,9 +46,10 @@ class FractalRuntime:
         max_iterations: int,
         verbose: bool,
         debug: bool,
+        session_id: str | None = None,
     ) -> "FractalRuntime":
         workspace = Path(workspace_path).resolve()
-        return cls(
+        runtime = cls(
             workspace_path=workspace,
             session=FractalSession.load(workspace),
             agent=FractalAgent(
@@ -59,6 +60,14 @@ class FractalRuntime:
                 debug=debug,
             ),
         )
+        if session_id is not None:
+            runtime.resume(session_id)
+        return runtime
+
+    def resume(self, session_id: str) -> None:
+        if not session_path(self.workspace_path, session_id).exists():
+            raise FileNotFoundError(f"No Fractal session found for id {session_id!r}.")
+        self.session = FractalSession.load(self.workspace_path, session_id=session_id)
 
     @property
     def session_id(self) -> str:

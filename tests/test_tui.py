@@ -28,12 +28,22 @@ class FakeRuntime:
         self.workspace_path = tmp_path
         self.session = FractalSession(session_id="test-session")
         self.submitted: list[str] = []
+        self.resumed: list[str] = []
         self.fail = fail
         self.include_trace = include_trace
 
     @property
     def session_id(self) -> str:
         return self.session.session_id
+
+    def resume(self, session_id: str) -> None:
+        from fractal.session import FractalSession
+        from fractal.session import session_path
+
+        self.resumed.append(session_id)
+        if not session_path(self.workspace_path, session_id).exists():
+            raise FileNotFoundError(f"No Fractal session found for id {session_id!r}.")
+        self.session = FractalSession.load(self.workspace_path, session_id=session_id)
 
     async def submit(self, user_message: str, **kwargs: object) -> object:
         from fractal.agent.schema import FractalResult
@@ -133,7 +143,9 @@ def test_terminal_tui_renders_summary_as_native_output(tmp_path: Path) -> None:
     console.print(render_summary(runtime.session.summary_model))
 
     text = output.getvalue()
-    assert "You" in text
+    assert text.startswith("\nfractal› hello fractal\n")
+    assert "fractal›" in text
+    assert "You" not in text
     assert "RLM" in text
     assert "hello fractal" in text
     assert "hello human" in text
@@ -199,7 +211,7 @@ def test_terminal_tui_run_submits_and_prints_to_scrollback(tmp_path: Path) -> No
 
     text = output.getvalue()
     assert runtime.submitted == ["fix"]
-    assert "fractal> " in text
+    assert "fractal› " in text
     assert "fix" in text
     assert "You" not in text
     assert "Running..." not in text
@@ -229,7 +241,7 @@ def test_terminal_tui_failed_submit_renders_error_and_continues(tmp_path: Path) 
     assert "model failed" in text
     assert "You" not in text
     assert "Running..." not in text
-    assert text.count("fractal> ") == 2
+    assert text.count("fractal› ") == 2
 
 
 def test_terminal_tui_uses_prompt_toolkit_session_for_live_input(tmp_path: Path) -> None:
@@ -250,5 +262,83 @@ def test_terminal_tui_uses_prompt_toolkit_session_for_live_input(tmp_path: Path)
     assert runtime.submitted == ["fix"]
     assert prompt_session.prompts
     assert "fractal" in str(prompt_session.prompts[0])
-    assert "fractal> " not in text
+    assert "fractal› " not in text
     assert "response to fix" in text
+
+
+def test_terminal_tui_resume_command_switches_sessions(tmp_path: Path) -> None:
+    from fractal.session import FractalSession
+    from fractal.tui import TerminalFractalApp
+
+    existing = FractalSession(session_id="existing")
+    turn_id = existing.add_user_message("prior request")
+    existing.add_agent_response("prior response", [], turn_id=turn_id)
+    existing.save(tmp_path)
+
+    runtime = FakeRuntime(tmp_path)
+    console, output = capture_console()
+    app = TerminalFractalApp(
+        runtime,
+        console=console,
+        input_stream=StringIO("/resume existing\n/exit\n"),
+    )
+
+    asyncio.run(app.run())
+
+    text = output.getvalue()
+    assert runtime.resumed == ["existing"]
+    assert runtime.session_id == "existing"
+    assert "resumed session existing" in text
+    assert "fractal› prior request" in text
+    assert "prior request" in text
+    assert "prior response" in text
+
+
+def test_terminal_tui_resume_command_requires_session_id(tmp_path: Path) -> None:
+    from fractal.tui import TerminalFractalApp
+
+    runtime = FakeRuntime(tmp_path)
+    console, output = capture_console()
+    app = TerminalFractalApp(
+        runtime,
+        console=console,
+        input_stream=StringIO("/resume\n/exit\n"),
+    )
+
+    asyncio.run(app.run())
+
+    assert runtime.resumed == []
+    assert "usage: /resume <session-id>" in output.getvalue()
+
+
+def test_terminal_tui_resume_command_errors_for_missing_session(tmp_path: Path) -> None:
+    from fractal.tui import TerminalFractalApp
+
+    runtime = FakeRuntime(tmp_path)
+    console, output = capture_console()
+    app = TerminalFractalApp(
+        runtime,
+        console=console,
+        input_stream=StringIO("/resume missing\n/exit\n"),
+    )
+
+    asyncio.run(app.run())
+
+    text = output.getvalue()
+    assert runtime.resumed == ["missing"]
+    assert runtime.session_id == "test-session"
+    assert "No Fractal session found for id 'missing'." in text
+
+
+def test_slash_command_completer_lists_commands() -> None:
+    from prompt_toolkit.document import Document
+
+    from fractal.tui.app import SlashCommandCompleter
+
+    completer = SlashCommandCompleter()
+
+    resume = list(completer.get_completions(Document("/r"), None))
+    none_after_space = list(completer.get_completions(Document("/resume "), None))
+
+    assert [completion.text for completion in resume] == ["/resume"]
+    assert none_after_space == []
