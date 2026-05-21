@@ -74,6 +74,47 @@ def test_runtime_submit_persists_failure_before_reraising(tmp_path: Path) -> Non
     assert session.history[-1].error == "model failed"
 
 
+def test_runtime_submit_persists_max_iterations_as_incomplete(tmp_path: Path) -> None:
+    from predict_rlm import RunTrace
+
+    from fractal.agent.schema import FractalResult
+    from fractal.runtime import FractalRuntime
+    from fractal.session import FractalSession
+
+    trace = RunTrace(
+        status="max_iterations",
+        model="test-model",
+        iterations=2,
+        max_iterations=2,
+        duration_ms=10,
+    )
+
+    class MaxIterationAgent:
+        async def aforward(self, **kwargs: object) -> FractalResult:
+            return FractalResult(
+                response="fallback answer",
+                changed_files=["README.md"],
+                trace=trace,
+            )
+
+    session = FractalSession()
+    runtime = FractalRuntime(
+        workspace_path=tmp_path,
+        session=session,
+        agent=MaxIterationAgent(),
+    )
+
+    result = asyncio.run(runtime.submit("finish task"))
+
+    assert result.response == "fallback answer"
+    assert session.turns[-1].agent is not None
+    assert session.turns[-1].agent.status == "max_iterations"
+    assert session.turns[-1].agent.response == "fallback answer"
+    assert session.turns[-1].agent.files_modified == ["README.md"]
+    assert session.history[-1].status == "max_iterations"
+    assert session.history[-1].trace == trace
+
+
 def test_runtime_create_and_resume_load_session_ids(tmp_path: Path) -> None:
     from fractal.runtime import FractalRuntime
     from fractal.session import FractalSession

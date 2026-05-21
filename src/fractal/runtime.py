@@ -9,7 +9,13 @@ from predict_rlm.trace import extract_trace_from_exc
 
 from .agent.schema import FractalResult
 from .agent.service import FractalAgent, coerce_trace
-from .session import FractalSession, SessionHistoryTurn, SummaryTurn, session_path
+from .session import (
+    MAX_ITERATIONS_ERROR,
+    FractalSession,
+    SessionHistoryTurn,
+    SummaryTurn,
+    session_path,
+)
 
 
 class FractalAgentLike(Protocol):
@@ -108,11 +114,23 @@ class FractalRuntime:
             self.session.save(self.workspace_path)
             raise
 
-        self.session.add_agent_response(
-            result.response,
-            result.changed_files,
-            trace=result.trace,
-            turn_id=turn_id,
-        )
+        # PredictRLM returns fallback output, not an exception, when the REPL
+        # loop exhausts its budget. Preserve that output, but do not mark the
+        # turn as a normal success.
+        if result.trace is not None and result.trace.status == "max_iterations":
+            self.session.add_agent_max_iterations(
+                result.response,
+                result.changed_files,
+                trace=result.trace,
+                turn_id=turn_id,
+                error=MAX_ITERATIONS_ERROR,
+            )
+        else:
+            self.session.add_agent_response(
+                result.response,
+                result.changed_files,
+                trace=result.trace,
+                turn_id=turn_id,
+            )
         self.session.save(self.workspace_path)
         return result

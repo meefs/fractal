@@ -161,7 +161,10 @@ class TerminalFractalApp:
                 self.console.print(Text("✗ failed", style="red"))
                 self.render_new_turns()
                 continue
-            self.console.print(Text("✓ complete"))
+            if result.trace is not None and result.trace.status == "max_iterations":
+                self.console.print(Text("! max iterations", style="yellow"))
+            else:
+                self.console.print(Text("✓ complete"))
             if result.trace is not None:
                 self.console.print(render_trace_summary(result.trace))
             self.render_new_turns()
@@ -332,7 +335,7 @@ def render_prompt_label() -> Text:
 
 
 def render_agent_message(turn: SummaryTurn, *, pending: bool = False) -> Panel:
-    body: str | Text | Markdown
+    body: str | Text | Markdown | Group
     style = "on #23262e"
     border_style = "white"
     if pending or turn.agent is None:
@@ -341,6 +344,20 @@ def render_agent_message(turn: SummaryTurn, *, pending: bool = False) -> Panel:
         body = turn.agent.error or "Turn failed."
         style = "on #2a1d22"
         border_style = "red"
+    elif turn.agent.status == "max_iterations":
+        # PredictRLM's fallback can contain useful work, but the agent did not
+        # explicitly SUBMIT it. Make that state visible in scrollback.
+        response: Text | Markdown
+        if turn.agent.response:
+            response = FractalMarkdown(turn.agent.response)
+        else:
+            response = Text("No fallback response.", style="dim")
+        body = Group(
+            Text("Reached max iterations; showing fallback response.", style="yellow"),
+            "",
+            response,
+        )
+        border_style = "yellow"
     else:
         body = FractalMarkdown(turn.agent.response)
 

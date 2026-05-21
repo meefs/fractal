@@ -22,6 +22,7 @@ class FakeRuntime:
         *,
         fail: bool = False,
         include_trace: bool = False,
+        max_iterations: bool = False,
     ) -> None:
         from fractal.session import FractalSession
 
@@ -31,6 +32,7 @@ class FakeRuntime:
         self.resumed: list[str] = []
         self.fail = fail
         self.include_trace = include_trace
+        self.max_iterations = max_iterations
 
     @property
     def session_id(self) -> str:
@@ -59,15 +61,27 @@ class FakeRuntime:
             self.session.add_agent_failure("model failed", turn_id=turn_id)
             raise RuntimeError("model failed")
         response = self._response(user_message)
-        self.session.add_agent_response(
-            response,
-            [],
-            trace=self._trace() if self.include_trace else None,
-            turn_id=turn_id,
-        )
+        trace = self._trace() if self.include_trace or self.max_iterations else None
+        if self.max_iterations:
+            from fractal.session import MAX_ITERATIONS_ERROR
+
+            self.session.add_agent_max_iterations(
+                response,
+                [],
+                trace=trace,
+                turn_id=turn_id,
+                error=MAX_ITERATIONS_ERROR,
+            )
+        else:
+            self.session.add_agent_response(
+                response,
+                [],
+                trace=trace,
+                turn_id=turn_id,
+            )
         return FractalResult(
             response=response,
-            trace=self._trace() if self.include_trace else None,
+            trace=trace,
         )
 
     def _response(self, user_message: str) -> str:
@@ -77,7 +91,7 @@ class FakeRuntime:
         from predict_rlm.trace import IterationStep, RunTrace
 
         return RunTrace(
-            status="completed",
+            status="max_iterations" if self.max_iterations else "completed",
             model="test-model",
             iterations=2,
             max_iterations=3,
@@ -175,6 +189,29 @@ def test_terminal_tui_renders_final_response_as_markdown(tmp_path: Path) -> None
     assert MARKDOWN_STYLE_OVERRIDES["markdown.code"] == "bold cyan"
 
 
+def test_terminal_tui_renders_max_iteration_response_as_incomplete(tmp_path: Path) -> None:
+    from rich.console import Group
+
+    from fractal.tui.app import render_agent_message
+
+    runtime = FakeRuntime(tmp_path)
+    turn_id = runtime.session.add_user_message("finish task")
+    from fractal.session import MAX_ITERATIONS_ERROR
+
+    runtime.session.add_agent_max_iterations(
+        "fallback response",
+        [],
+        turn_id=turn_id,
+        error=MAX_ITERATIONS_ERROR,
+    )
+    turn = runtime.session.turns[-1]
+
+    panel = render_agent_message(turn)
+
+    assert panel.border_style == "yellow"
+    assert isinstance(panel.renderable, Group)
+
+
 def test_terminal_tui_renders_compact_trace_summary(tmp_path: Path) -> None:
     from fractal.tui.app import render_trace_summary
 
@@ -242,6 +279,27 @@ def test_terminal_tui_failed_submit_renders_error_and_continues(tmp_path: Path) 
     assert "You" not in text
     assert "Running..." not in text
     assert text.count("fractal› ") == 2
+
+
+def test_terminal_tui_max_iterations_is_not_rendered_as_complete(tmp_path: Path) -> None:
+    from fractal.tui import TerminalFractalApp
+
+    runtime = FakeRuntime(tmp_path, max_iterations=True)
+    console, output = capture_console()
+    app = TerminalFractalApp(
+        runtime,
+        console=console,
+        input_stream=StringIO("finish\n/exit\n"),
+    )
+
+    asyncio.run(app.run())
+
+    text = output.getvalue()
+    assert runtime.submitted == ["finish"]
+    assert "! max iterations" in text
+    assert "✓ complete" not in text
+    assert "Reached max iterations; showing fallback response." in text
+    assert "response to finish" in text
 
 
 def test_terminal_tui_uses_prompt_toolkit_session_for_live_input(tmp_path: Path) -> None:

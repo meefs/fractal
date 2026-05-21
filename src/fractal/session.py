@@ -16,6 +16,9 @@ SESSION_DIR = ".fractal"
 SESSIONS_DIR = "sessions"
 SCHEMA_VERSION = 1
 MAX_HISTORY_TURNS = 20
+MAX_ITERATIONS_ERROR = (
+    "Reached max iterations before SUBMIT; response came from fallback extraction."
+)
 
 
 def _new_session_id() -> str:
@@ -27,7 +30,7 @@ class UserTurn(BaseModel):
 
 
 class AgentTurn(BaseModel):
-    status: Literal["succeeded", "failed"]
+    status: Literal["succeeded", "failed", "max_iterations"]
     response: str = ""
     files_read: list[str] = Field(default_factory=list)
     files_modified: list[str] = Field(default_factory=list)
@@ -47,7 +50,7 @@ class SessionSummary(BaseModel):
 class SessionHistoryTurn(BaseModel):
     turn_id: str
     user_message: str
-    status: Literal["pending", "succeeded", "failed"]
+    status: Literal["pending", "succeeded", "failed", "max_iterations"]
     trace: RunTrace | None = None
     error: str | None = None
     created_at: str
@@ -231,6 +234,36 @@ class FractalSession:
         history_turn = self._find_history_turn(turn_id or summary_turn.turn_id)
         if history_turn is not None:
             history_turn.status = "failed"
+            history_turn.trace = trace
+            history_turn.error = error
+            history_turn.updated_at = _utc_now()
+        self._enforce_history_limit()
+
+    def add_agent_max_iterations(
+        self,
+        content: str,
+        changed_files: list[str],
+        *,
+        trace: RunTrace | None = None,
+        turn_id: str | None = None,
+        error: str | None = None,
+    ) -> None:
+        summary_turn = self._find_summary_turn(turn_id)
+        if summary_turn is None:
+            generated_id = self.add_user_message("")
+            summary_turn = self._find_summary_turn(generated_id)
+            turn_id = generated_id
+        assert summary_turn is not None
+        files_modified = _coerce_string_list(changed_files)
+        summary_turn.agent = AgentTurn(
+            status="max_iterations",
+            response=content,
+            files_modified=files_modified,
+            error=error,
+        )
+        history_turn = self._find_history_turn(turn_id or summary_turn.turn_id)
+        if history_turn is not None:
+            history_turn.status = "max_iterations"
             history_turn.trace = trace
             history_turn.error = error
             history_turn.updated_at = _utc_now()
