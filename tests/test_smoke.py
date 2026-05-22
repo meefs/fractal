@@ -53,7 +53,6 @@ def test_signature_fields() -> None:
     )
     assert "session_summary" not in fields
     assert fields["session_history"].annotation == list[SessionHistoryTurn]
-    assert "Markdown-formatted response" in fields["response"].json_schema_extra["desc"]
     assert "User: fix tests" in signature.instructions
 
 

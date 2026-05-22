@@ -167,6 +167,17 @@ def capture_console() -> tuple[Console, StringIO]:
     )
 
 
+def normalized_output(text: str) -> str:
+    return " ".join(text.split())
+
+
+def agent_statuses(runtime: FakeRuntime) -> list[str | None]:
+    return [
+        turn.agent.status if turn.agent is not None else None
+        for turn in runtime.session.turns
+    ]
+
+
 def test_terminal_tui_renders_summary_as_native_output(tmp_path: Path) -> None:
     from fractal.tui.app import render_summary
 
@@ -183,20 +194,14 @@ def test_terminal_tui_renders_summary_as_native_output(tmp_path: Path) -> None:
     console.print(render_summary(runtime.session.summary_model))
 
     text = output.getvalue()
-    assert text.startswith("\nfractal› hello fractal\n")
-    assert "fractal›" in text
-    assert "You" not in text
-    assert "RLM" in text
     assert "hello fractal" in text
     assert "hello human" in text
-    assert "─" in text
 
 
 def test_terminal_tui_renders_final_response_as_markdown(tmp_path: Path) -> None:
     from rich.markdown import Markdown
 
     from fractal.tui.app import FractalMarkdown
-    from fractal.tui.app import MARKDOWN_STYLE_OVERRIDES
     from fractal.tui.app import render_agent_message
 
     runtime = FakeRuntime(tmp_path)
@@ -213,12 +218,9 @@ def test_terminal_tui_renders_final_response_as_markdown(tmp_path: Path) -> None
 
     assert isinstance(panel.renderable, Markdown)
     assert isinstance(panel.renderable, FractalMarkdown)
-    assert MARKDOWN_STYLE_OVERRIDES["markdown.code"] == "bold cyan"
 
 
 def test_terminal_tui_renders_max_iteration_response_as_incomplete(tmp_path: Path) -> None:
-    from rich.console import Group
-
     from fractal.tui.app import render_agent_message
 
     runtime = FakeRuntime(tmp_path)
@@ -235,14 +237,15 @@ def test_terminal_tui_renders_max_iteration_response_as_incomplete(tmp_path: Pat
     turn = runtime.session.turns[-1]
 
     panel = render_agent_message(turn)
+    console, output = capture_console()
+    console.print(panel)
 
-    assert panel.border_style == "yellow"
-    assert isinstance(panel.renderable, Group)
+    text = output.getvalue()
+    assert "Reached max iterations; showing fallback response." in text
+    assert "fallback response" in text
 
 
 def test_terminal_tui_renders_interrupted_response(tmp_path: Path) -> None:
-    from rich.text import Text
-
     from fractal.tui.app import render_agent_message
 
     runtime = FakeRuntime(tmp_path)
@@ -252,8 +255,6 @@ def test_terminal_tui_renders_interrupted_response(tmp_path: Path) -> None:
 
     rendered = render_agent_message(turn)
 
-    assert isinstance(rendered, Text)
-    assert rendered.style == "yellow"
     assert "interrupted" in str(rendered)
 
 
@@ -267,12 +268,15 @@ def test_terminal_tui_renders_compact_trace_summary(tmp_path: Path) -> None:
     console.print(render_trace_summary(trace))
 
     text = output.getvalue()
+    normalized_text = normalized_output(text)
     assert "RLM turn 1/3" in text
     assert "reasoning: Inspect the files first" in text
-    assert "\n             reasoning long enough to wrap in a narrow" in text
+    assert (
+        "Inspect the files first and keep the reasoning long enough to wrap "
+        "in a narrow terminal."
+    ) in normalized_text
     assert "python: 2 lines" in text
     assert "output: 11 chars" in text
-    assert "\n\nRLM turn 2/3" in text
     assert "RLM turn 2/3" in text
     assert "python: 1 lines" in text
     assert "print('a')" not in text
@@ -293,9 +297,6 @@ def test_terminal_tui_run_submits_and_prints_to_scrollback(tmp_path: Path) -> No
 
     text = output.getvalue()
     assert runtime.submitted == ["fix"]
-    assert "fractal› " in text
-    assert "fix" in text
-    assert "You" not in text
     assert "Running..." not in text
     assert "✓ complete" in text
     assert "RLM turn 1/3" in text
@@ -321,9 +322,7 @@ def test_terminal_tui_failed_submit_renders_error_and_continues(tmp_path: Path) 
     assert runtime.submitted == ["fail"]
     assert "✗ failed" in text
     assert "model failed" in text
-    assert "You" not in text
     assert "Running..." not in text
-    assert text.count("fractal› ") == 2
 
 
 def test_terminal_tui_interrupted_submit_renders_and_continues(tmp_path: Path) -> None:
@@ -345,7 +344,6 @@ def test_terminal_tui_interrupted_submit_renders_and_continues(tmp_path: Path) -
     assert "Turn interrupted by user." in text
     assert "response to next" in text
     assert "✓ complete" in text
-    assert text.count("fractal› ") == 3
 
 
 def test_terminal_tui_handles_interrupt_before_submit_task_is_active(tmp_path: Path) -> None:
@@ -463,10 +461,9 @@ def test_terminal_tui_two_interrupted_submits_do_not_exit(tmp_path: Path) -> Non
     text = output.getvalue()
     assert runtime.submitted == ["stop", "again", "final"]
     assert "! turn interrupted" not in text
-    assert text.count("Turn interrupted by user.") == 2
+    assert agent_statuses(runtime) == ["interrupted", "interrupted", "succeeded"]
     assert "response to final" in text
     assert "✓ complete" in text
-    assert text.count("fractal› ") == 4
 
 
 def test_terminal_tui_late_prompt_sigint_after_interrupt_does_not_exit(
@@ -495,7 +492,7 @@ def test_terminal_tui_late_prompt_sigint_after_interrupt_does_not_exit(
     text = output.getvalue()
     assert runtime.submitted == ["stop", "again", "final"]
     assert app.injected_late_sigints == 2
-    assert text.count("Turn interrupted by user.") == 2
+    assert agent_statuses(runtime) == ["interrupted", "interrupted", "succeeded"]
     assert "response to final" in text
 
 
@@ -537,8 +534,6 @@ def test_terminal_tui_uses_prompt_toolkit_session_for_live_input(tmp_path: Path)
     text = output.getvalue()
     assert runtime.submitted == ["fix"]
     assert prompt_session.prompts
-    assert "fractal" in str(prompt_session.prompts[0])
-    assert "fractal› " not in text
     assert "response to fix" in text
 
 
@@ -570,7 +565,6 @@ def test_terminal_tui_resume_command_switches_sessions(tmp_path: Path) -> None:
     assert runtime.resumed == ["existing"]
     assert runtime.session_id == "existing"
     assert "resumed session existing" in text
-    assert "fractal› prior request" in text
     assert "prior request" in text
     assert "prior response" in text
 

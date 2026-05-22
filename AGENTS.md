@@ -85,6 +85,11 @@ detection, branch/worktree awareness, and optional commit generation.
   predict-rlm checkout does not export it.
 - Add focused tests for session migration/persistence, context building, command
   policy, changed-file detection, and failure handling as those features land.
+- Tests should verify behavior and durable state, not incidental presentation
+  details. Avoid assertions that depend on exact terminal wrapping, whitespace,
+  box-drawing characters, prompt counts, color/style internals, or the mere
+  existence of static files. For CLI output, prefer checking semantic content or
+  normalized text unless layout itself is the behavior under test.
 
 ## Current Caveats
 
