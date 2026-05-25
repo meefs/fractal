@@ -27,6 +27,7 @@ class FractalAgentLike(Protocol):
         user_message: str,
         rendered_session_summary: str = "",
         session_history: list[SessionHistoryTurn] | None = None,
+        included_paths: list[Path] | None = None,
     ) -> FractalResult: ...
 
 
@@ -37,10 +38,12 @@ class FractalRuntime:
         self,
         *,
         workspace_path: str | Path,
+        included_paths: list[str | Path] | None = None,
         session: FractalSession,
         agent: FractalAgentLike,
     ) -> None:
         self.workspace_path = Path(workspace_path).resolve()
+        self.included_paths = [Path(path).resolve() for path in included_paths or []]
         self.session = session
         self.agent = agent
 
@@ -49,6 +52,7 @@ class FractalRuntime:
         cls,
         *,
         workspace_path: str | Path,
+        included_paths: list[str | Path] | None = None,
         lm: str | None,
         sub_lm: str | None,
         max_iterations: int,
@@ -59,6 +63,7 @@ class FractalRuntime:
         workspace = Path(workspace_path).resolve()
         runtime = cls(
             workspace_path=workspace,
+            included_paths=included_paths,
             session=FractalSession.load(workspace),
             agent=FractalAgent(
                 lm=lm,
@@ -114,6 +119,7 @@ class FractalRuntime:
                 user_message=user_message,
                 rendered_session_summary=self.session.summary(),
                 session_history=self.session.session_history_payload(),
+                included_paths=self.included_paths,
             )
         except asyncio.CancelledError as exc:
             if interrupt_requested is None or not interrupt_requested():

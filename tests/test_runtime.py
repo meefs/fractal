@@ -26,8 +26,11 @@ def test_runtime_submit_persists_success_and_exposes_pending_state(tmp_path: Pat
             return FractalResult(response="updated docs", changed_files=["README.md"])
 
     session = FractalSession()
+    included_path = tmp_path / "included"
+    included_path.mkdir()
     runtime = FractalRuntime(
         workspace_path=tmp_path,
+        included_paths=[included_path],
         session=session,
         agent=FakeAgent(),
     )
@@ -44,6 +47,7 @@ def test_runtime_submit_persists_success_and_exposes_pending_state(tmp_path: Pat
     assert session.turns[-1].agent.response == "updated docs"
     assert session.turns[-1].agent.files_modified == ["README.md"]
     assert calls[0]["workspace_path"] == tmp_path
+    assert calls[0]["included_paths"] == [included_path.resolve()]
     assert calls[0]["user_message"] == "update docs"
     assert "update docs" in str(calls[0]["rendered_session_summary"])
     assert session.history[-1].status == "succeeded"
@@ -253,6 +257,8 @@ def test_runtime_create_and_resume_load_session_ids(tmp_path: Path) -> None:
     existing = FractalSession(session_id="existing")
     existing.add_user_message("prior work")
     existing.save(tmp_path)
+    included_path = tmp_path / "included"
+    included_path.mkdir()
 
     runtime = FractalRuntime(
         workspace_path=tmp_path,
@@ -266,6 +272,7 @@ def test_runtime_create_and_resume_load_session_ids(tmp_path: Path) -> None:
 
     created = FractalRuntime.create(
         workspace_path=tmp_path,
+        included_paths=[included_path],
         lm=None,
         sub_lm=None,
         max_iterations=1,
@@ -275,6 +282,7 @@ def test_runtime_create_and_resume_load_session_ids(tmp_path: Path) -> None:
     )
 
     assert created.session_id == "existing"
+    assert created.included_paths == [included_path.resolve()]
     assert created.turns[-1].user.message == "prior work"
 
 

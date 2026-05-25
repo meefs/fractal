@@ -35,14 +35,21 @@ class FractalAgent(dspy.Module):
         user_message: str,
         rendered_session_summary: str = "",
         session_history: list[SessionHistoryTurn] | None = None,
+        included_paths: list[str | Path] | None = None,
     ) -> FractalResult:
         workspace = Workspace(
-            path=str(Path(workspace_path)),
-            mount_path="/workspace",
+            path=str(Path(workspace_path).resolve()),
             mode=WorkspaceMode.DIRECT,
         )
         if ".fractal" not in workspace.exclude:
             workspace.exclude = [*workspace.exclude, ".fractal"]
+        included_workspaces = [
+            Workspace(
+                path=str(Path(path).resolve()),
+                mode=WorkspaceMode.DIRECT,
+            )
+            for path in included_paths or []
+        ]
 
         signature = build_edit_workspace_signature(rendered_session_summary)
         predictor = PredictRLM(
@@ -57,6 +64,7 @@ class FractalAgent(dspy.Module):
         )
         result = await predictor.acall(
             workspace=workspace,
+            included_paths=included_workspaces or None,
             user_message=user_message,
             session_history=session_history or [],
         )
