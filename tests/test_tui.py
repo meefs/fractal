@@ -179,7 +179,11 @@ def agent_statuses(runtime: FakeRuntime) -> list[str | None]:
 
 
 def test_terminal_tui_renders_summary_as_native_output(tmp_path: Path) -> None:
+    from rich.padding import Padding
+
     from fractal.tui.app import render_summary
+    from fractal.tui.app import render_agent_response
+    from fractal.tui.app import render_user_message
 
     runtime = FakeRuntime(tmp_path)
     turn_id = runtime.session.add_user_message("hello fractal")
@@ -196,6 +200,21 @@ def test_terminal_tui_renders_summary_as_native_output(tmp_path: Path) -> None:
     text = output.getvalue()
     assert "hello fractal" in text
     assert "hello human" in text
+    user_message = render_user_message("hello fractal")
+    assert user_message.renderables[1].spans[-1].style == "bold"
+    agent_response = render_agent_response(runtime.session.turns[-1])
+    assert isinstance(agent_response, Padding)
+    assert agent_response.left == 2
+
+
+def test_terminal_tui_prompt_label_is_purple() -> None:
+    from fractal.tui.app import PROMPT_STYLE
+    from fractal.tui.app import render_prompt_label
+
+    label = render_prompt_label()
+
+    assert label.spans[0].style == "bold #8b5cf6"
+    assert PROMPT_STYLE.style_rules[0] == ("prompt", "bold #8b5cf6")
 
 
 def test_terminal_tui_renders_final_response_as_markdown(tmp_path: Path) -> None:
@@ -214,10 +233,10 @@ def test_terminal_tui_renders_final_response_as_markdown(tmp_path: Path) -> None
     )
     turn = runtime.session.turns[-1]
 
-    panel = render_agent_message(turn)
+    message = render_agent_message(turn)
 
-    assert isinstance(panel.renderable, Markdown)
-    assert isinstance(panel.renderable, FractalMarkdown)
+    assert isinstance(message, Markdown)
+    assert isinstance(message, FractalMarkdown)
 
 
 def test_terminal_tui_renders_max_iteration_response_as_incomplete(tmp_path: Path) -> None:

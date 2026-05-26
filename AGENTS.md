@@ -62,6 +62,11 @@ detection, branch/worktree awareness, and optional commit generation.
 
 - Keep changes narrowly scoped. This repo is small; avoid introducing broad
   abstractions before the behavior needs them.
+- Fractal depends on the local editable `../predict-rlm` checkout, and we own
+  that package too. If a problem is caused by a PredictRLM interface,
+  serialization, sandbox, or trace limitation, call it out as a PredictRLM issue
+  instead of adding a Fractal workaround by default. Fix PredictRLM directly
+  when that is the right layer.
 - Prefer host-side truth over model-reported truth for state, files changed,
   commands run, verification status, and errors.
 - Preserve user work. Fractal should not overwrite unrelated edits or hide dirty

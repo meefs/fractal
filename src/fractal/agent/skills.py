@@ -12,9 +12,9 @@ Use `os` for syscall-like filesystem operations: directory-relative paths, raw f
 import os
 import stat
 
-# Open the trusted workspace directory.
+# Open the trusted workspace directory from the `workspace` input variable.
 # Treat this as the root for all relative paths.
-root_fd = os.open("/tmp/workspace", os.O_RDONLY | os.O_DIRECTORY)
+root_fd = os.open(workspace, os.O_RDONLY | os.O_DIRECTORY)
 ```
 
 ## Opening & creating files

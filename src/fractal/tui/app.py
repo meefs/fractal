@@ -14,7 +14,6 @@ from prompt_toolkit.styles import Style
 from rich.console import Console, Group
 from rich.markdown import Markdown
 from rich.padding import Padding
-from rich.panel import Panel
 from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
@@ -27,7 +26,7 @@ from predict_rlm import RunTrace
 
 PROMPT_STYLE = Style.from_dict(
     {
-        "prompt": "bold ansicyan",
+        "prompt": "bold #8b5cf6",
         "session": "ansibrightblack",
     }
 )
@@ -282,11 +281,11 @@ class TerminalFractalApp:
                 continue
             if turn.turn_id in self._pending_turn_ids:
                 self.console.print(Rule(style="dim"))
-                self.console.print(render_agent_message(turn))
+                self.console.print(render_agent_response(turn))
                 self._pending_turn_ids.remove(turn.turn_id)
             elif turn.turn_id in self._prompt_echo_turn_ids:
                 self.console.print(Rule(style="dim"))
-                self.console.print(render_agent_message(turn))
+                self.console.print(render_agent_response(turn))
             else:
                 self.render_turn(turn)
             self._rendered_turn_ids.add(turn.turn_id)
@@ -294,7 +293,7 @@ class TerminalFractalApp:
     def render_turn(self, turn: SummaryTurn, *, pending: bool = False) -> None:
         self.console.print(render_user_message(turn.user.message))
         self.console.print(Rule(style="dim"))
-        self.console.print(render_agent_message(turn, pending=pending))
+        self.console.print(render_agent_response(turn, pending=pending))
 
     def mark_latest_turn_as_prompt_echoed(self) -> None:
         if self.runtime.session.summary_model.turns:
@@ -344,7 +343,7 @@ def render_summary(summary: SessionSummary) -> Group:
             rendered.append(Rule(style="dim"))
         rendered.append(render_user_message(turn.user.message))
         rendered.append(Rule(style="dim"))
-        rendered.append(render_agent_message(turn))
+        rendered.append(render_agent_response(turn))
     return Group(*rendered)
 
 
@@ -403,11 +402,14 @@ def render_reasoning(reasoning: str) -> Padding:
 
 
 def render_user_message(message: str) -> Group:
-    return Group("", Text.assemble(render_prompt_label(), message))
+    return Group(
+        "",
+        Text.assemble(render_prompt_label(), (message, "bold")),
+    )
 
 
 def render_prompt_label() -> Text:
-    return Text.assemble(("fractal", "bold cyan"), ("›", "bright_black"), " ")
+    return Text.assemble(("fractal", "bold #8b5cf6"), ("›", "bright_black"), " ")
 
 
 def _will_submit_turn(message: str) -> bool:
@@ -418,15 +420,10 @@ def _will_submit_turn(message: str) -> bool:
 
 
 def render_agent_message(turn: SummaryTurn, *, pending: bool = False) -> object:
-    body: str | Text | Markdown | Group
-    style = "on #23262e"
-    border_style = "white"
     if pending or turn.agent is None:
-        body = Text("Running...", style="italic dim")
+        return Text("Running...", style="italic dim")
     elif turn.agent.status == "failed":
-        body = turn.agent.error or "Turn failed."
-        style = "on #2a1d22"
-        border_style = "red"
+        return Text(turn.agent.error or "Turn failed.", style="red")
     elif turn.agent.status == "interrupted":
         return Text(turn.agent.error or "Turn interrupted by user.", style="yellow")
     elif turn.agent.status == "max_iterations":
@@ -442,18 +439,13 @@ def render_agent_message(turn: SummaryTurn, *, pending: bool = False) -> object:
             "",
             response,
         )
-        border_style = "yellow"
+        return body
     else:
-        body = FractalMarkdown(turn.agent.response)
+        return FractalMarkdown(turn.agent.response)
 
-    return Panel(
-        body,
-        title="RLM",
-        title_align="left",
-        border_style=border_style,
-        style=style,
-        padding=(1, 2),
-    )
+
+def render_agent_response(turn: SummaryTurn, *, pending: bool = False) -> Padding:
+    return Padding(render_agent_message(turn, pending=pending), (0, 0, 0, 2))
 
 
 def _line_count(text: str) -> int:
