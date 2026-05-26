@@ -321,7 +321,7 @@ def test_run_tui_shows_shutdown_status_and_closes_runtime(
         "status_exit",
         "app",
         "run",
-        "status:[dim]shutting down sandbox... press Ctrl-C again to force exit[/dim]:dots",
+        "status:[dim]shutting down sandbox... press Ctrl-C again to force exit without cleaning up the sandbox[/dim]:dots",
         "status_enter",
         "close",
         "status_exit",

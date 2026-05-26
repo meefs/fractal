@@ -97,7 +97,7 @@ def run_tui(args: argparse.Namespace) -> int:
     finally:
         try:
             with console.status(
-                "[dim]shutting down sandbox... press Ctrl-C again to force exit[/dim]",
+                "[dim]shutting down sandbox... press Ctrl-C again to force exit without cleaning up the sandbox[/dim]",
                 spinner="dots",
             ):
                 runtime.close()
