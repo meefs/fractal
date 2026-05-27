@@ -115,7 +115,10 @@ class FractalRuntime:
         runtime_events = RuntimeEventTracker()
 
         def observe_runtime_event(raw_event: object) -> None:
-            event = runtime_events.observe(raw_event)
+            try:
+                event = runtime_events.observe(raw_event)
+            except Exception:
+                return
             if event is None or on_runtime_event is None:
                 return
             try:
@@ -134,7 +137,6 @@ class FractalRuntime:
             self.session.add_agent_turn(
                 status="interrupted",
                 error=INTERRUPTED_ERROR,
-                changed_files=runtime_events.files_modified,
                 files_read=runtime_events.files_read,
                 commands_run=runtime_events.commands_run,
                 turn_id=turn_id,
@@ -161,7 +163,6 @@ class FractalRuntime:
                 status="interrupted",
                 error=INTERRUPTED_ERROR,
                 trace=_extract_run_trace(exc),
-                changed_files=runtime_events.files_modified,
                 files_read=runtime_events.files_read,
                 commands_run=runtime_events.commands_run,
                 turn_id=turn_id,
@@ -174,7 +175,6 @@ class FractalRuntime:
                     status="interrupted",
                     error=INTERRUPTED_ERROR,
                     trace=_extract_run_trace(exc),
-                    changed_files=runtime_events.files_modified,
                     files_read=runtime_events.files_read,
                     commands_run=runtime_events.commands_run,
                     turn_id=turn_id,
@@ -187,7 +187,6 @@ class FractalRuntime:
                 status="failed",
                 error=str(exc),
                 trace=_extract_run_trace(exc),
-                changed_files=runtime_events.files_modified,
                 files_read=runtime_events.files_read,
                 commands_run=runtime_events.commands_run,
                 turn_id=turn_id,
@@ -195,10 +194,6 @@ class FractalRuntime:
             self.session.save(self.workspace_path)
             raise
 
-        result.changed_files = _merge_unique(
-            result.changed_files,
-            runtime_events.files_modified,
-        )
         # PredictRLM returns fallback output, not an exception, when the REPL
         # loop exhausts its budget. Preserve that output, but do not mark the
         # turn as a normal success.
@@ -229,16 +224,22 @@ class FractalRuntime:
 
 def _extract_run_trace(exc: BaseException) -> RunTrace | None:
     trace = extract_trace_from_exc(exc)
-    if trace is None or isinstance(trace, RunTrace):
+    if trace is None:
         return trace
-    raise TypeError(
-        f"PredictRLM exception trace must be RunTrace, not {type(trace).__name__}."
-    )
+    if isinstance(trace, RunTrace):
+        return trace
+    if isinstance(trace, dict):
+        return _validate_run_trace(trace)
+    if hasattr(trace, "model_dump"):
+        try:
+            return _validate_run_trace(trace.model_dump(mode="python"))
+        except TypeError:
+            return None
+    return None
 
 
-def _merge_unique(first: list[str], second: list[str]) -> list[str]:
-    merged = list(first)
-    for value in second:
-        if value not in merged:
-            merged.append(value)
-    return merged
+def _validate_run_trace(value: object) -> RunTrace | None:
+    try:
+        return RunTrace.model_validate(value)
+    except ValueError:
+        return None

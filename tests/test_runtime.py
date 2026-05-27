@@ -54,7 +54,9 @@ def test_runtime_submit_persists_success_and_exposes_pending_state(tmp_path: Pat
     assert session.history[-1].status == "succeeded"
 
 
-def test_runtime_submit_persists_runtime_event_facts(tmp_path: Path) -> None:
+def test_runtime_submit_surfaces_runtime_events_and_persists_safe_facts(
+    tmp_path: Path,
+) -> None:
     from fractal.agent.schema import FractalResult
     from fractal.runtime import FractalRuntime
     from fractal.session import FractalSession
@@ -69,26 +71,31 @@ def test_runtime_submit_persists_runtime_event_facts(tmp_path: Path) -> None:
                 "target": "builtins.open",
                 "phase": "before",
                 "args": ["README.md", "r"],
+                "timestamp": 0.0,
             })
             on_runtime_event({
                 "target": "builtins.open",
                 "phase": "after",
                 "args": ["README.md", "r"],
+                "timestamp": 0.0,
             })
             on_runtime_event({
                 "target": "pathlib.Path.write_text",
                 "phase": "before",
                 "args": ["src/app.py", "updated"],
+                "timestamp": 0.0,
             })
             on_runtime_event({
                 "target": "pathlib.Path.write_text",
                 "phase": "after",
                 "args": ["src/app.py", "updated"],
+                "timestamp": 0.0,
             })
             on_runtime_event({
                 "target": "subprocess.run",
                 "phase": "before",
                 "args": [["uv", "run", "pytest"]],
+                "timestamp": 0.0,
             })
             return FractalResult(response="done")
 
@@ -106,7 +113,7 @@ def test_runtime_submit_persists_runtime_event_facts(tmp_path: Path) -> None:
         )
     )
 
-    assert result.changed_files == ["src/app.py"]
+    assert result.changed_files == []
     assert surfaced == [
         "opening README.md",
         "editing src/app.py",
@@ -114,7 +121,7 @@ def test_runtime_submit_persists_runtime_event_facts(tmp_path: Path) -> None:
     ]
     assert session.turns[-1].agent is not None
     assert session.turns[-1].agent.files_read == ["README.md"]
-    assert session.turns[-1].agent.files_modified == ["src/app.py"]
+    assert session.turns[-1].agent.files_modified == []
     assert session.turns[-1].agent.commands_run == ["uv run pytest"]
 
 
@@ -141,6 +148,35 @@ def test_runtime_submit_persists_failure_before_reraising(tmp_path: Path) -> Non
     assert session.turns[-1].agent.error == "model failed"
     assert session.history[-1].status == "failed"
     assert session.history[-1].error == "model failed"
+
+
+def test_runtime_submit_does_not_mask_failure_with_malformed_trace(
+    tmp_path: Path,
+) -> None:
+    from fractal.runtime import FractalRuntime
+    from fractal.session import FractalSession
+
+    class FailingAgent:
+        async def aforward(self, **kwargs: object) -> object:
+            exc = RuntimeError("model failed")
+            exc.trace = {"not": "a RunTrace"}
+            raise exc
+
+    session = FractalSession()
+    runtime = FractalRuntime(
+        workspace_path=tmp_path,
+        session=session,
+        agent=FailingAgent(),
+    )
+
+    with pytest.raises(RuntimeError, match="model failed"):
+        asyncio.run(runtime.submit("run tests"))
+
+    assert session.turns[-1].agent is not None
+    assert session.turns[-1].agent.status == "failed"
+    assert session.turns[-1].agent.error == "model failed"
+    assert session.history[-1].status == "failed"
+    assert session.history[-1].trace is None
 
 
 def test_runtime_submit_persists_interruption_before_reraising(tmp_path: Path) -> None:

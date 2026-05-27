@@ -70,6 +70,18 @@ class FractalRuntimeEvent:
 
 
 @dataclass(slots=True)
+class RuntimeHookSnapshot:
+    """Fractal's normalized view of a PredictRLM runtime hook event."""
+
+    target: str
+    phase: str
+    args: list[Any] = field(default_factory=list)
+    kwargs: dict[str, Any] = field(default_factory=dict)
+    result: Any = None
+    error: str | None = None
+
+
+@dataclass(slots=True)
 class RuntimeEventTracker:
     """Turn-local reducer for low-level PredictRLM runtime hook events."""
 
@@ -80,13 +92,13 @@ class RuntimeEventTracker:
     _active_compound_paths: dict[str, int] = field(default_factory=dict)
     _active_compound_commands: dict[str, list[str]] = field(default_factory=dict)
 
-    def observe(self, raw_event: Any) -> FractalRuntimeEvent | None:
-        event = _event_mapping(raw_event)
-        target = _string_field(event, "target")
-        phase = _string_field(event, "phase")
-        args = _list_field(event, "args")
-        kwargs = _dict_field(event, "kwargs")
-        result = event.get("result")
+    def observe(self, raw_event: object) -> FractalRuntimeEvent | None:
+        event = adapt_runtime_hook_event(raw_event)
+        target = event.target
+        phase = event.phase
+        args = event.args
+        kwargs = event.kwargs
+        result = event.result
 
         if target in COMMAND_HOOK_TARGETS:
             command = _command_from_args(args)
@@ -281,34 +293,27 @@ def build_predict_runtime_hooks() -> list[Any]:
     ]
 
 
-def _event_mapping(raw_event: Any) -> dict[str, Any]:
-    if isinstance(raw_event, dict):
+def adapt_runtime_hook_event(raw_event: object) -> RuntimeHookSnapshot:
+    if isinstance(raw_event, RuntimeHookSnapshot):
         return raw_event
-    if hasattr(raw_event, "model_dump"):
-        return raw_event.model_dump(mode="python")
-    return {
-        "target": getattr(raw_event, "target", ""),
-        "phase": getattr(raw_event, "phase", ""),
-        "args": getattr(raw_event, "args", []),
-        "kwargs": getattr(raw_event, "kwargs", {}),
-        "result": getattr(raw_event, "result", None),
-        "error": getattr(raw_event, "error", None),
-    }
+    try:
+        from predict_rlm import RuntimeHookEvent
+    except ImportError as exc:
+        raise TypeError("PredictRLM RuntimeHookEvent is unavailable.") from exc
 
-
-def _string_field(event: dict[str, Any], name: str) -> str:
-    value = event.get(name)
-    return value if isinstance(value, str) else ""
-
-
-def _list_field(event: dict[str, Any], name: str) -> list[Any]:
-    value = event.get(name)
-    return value if isinstance(value, list) else []
-
-
-def _dict_field(event: dict[str, Any], name: str) -> dict[str, Any]:
-    value = event.get(name)
-    return value if isinstance(value, dict) else {}
+    event = (
+        raw_event
+        if isinstance(raw_event, RuntimeHookEvent)
+        else RuntimeHookEvent.model_validate(raw_event)
+    )
+    return RuntimeHookSnapshot(
+        target=event.target,
+        phase=event.phase,
+        args=list(event.args),
+        kwargs=dict(event.kwargs),
+        result=event.result,
+        error=event.error,
+    )
 
 
 def _path_from_args(args: list[Any]) -> str | None:
