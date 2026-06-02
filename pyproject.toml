@@ -9,6 +9,7 @@ dependencies = [
     "prompt-toolkit>=3.0",
     "predict-rlm",
     "rich>=13",
+    "tomli-w>=1.2",
 ]
 
 [project.scripts]
