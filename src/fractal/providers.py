@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
+from urllib.parse import urlparse
 
 
 OPENAI_CODEX = "openai-codex"
@@ -28,6 +29,10 @@ class ProviderConfigError(ProviderError):
 
 class UnsupportedProviderModelError(ProviderError):
     """Raised when a provider cannot use the requested model."""
+
+
+class MissingProviderCredentialError(ProviderConfigError):
+    """Raised when a provider's configured credential source is unavailable."""
 
 
 @dataclass(frozen=True)
@@ -140,7 +145,22 @@ def build_lm(
         return _build_codex_lm(selection, definition)
     if definition.id == CUSTOM_OPENAI_COMPATIBLE:
         return _build_custom_openai_lm(selection, definition, env=env)
+    validate_provider_selection(selection, env=env)
     return _normalize_model(_selection_model(selection, definition), definition)
+
+
+def validate_provider_selection(
+    selection: ProviderSelection,
+    *,
+    env: Mapping[str, str] | None = None,
+) -> None:
+    definition = get_provider(selection.provider)
+    _selection_model(selection, definition)
+    if definition.id == CUSTOM_OPENAI_COMPATIBLE:
+        _validate_custom_openai_selection(selection, env=env)
+        return
+    if definition.auth_type == "api_key_env":
+        _require_api_key_env(selection, definition, env=env)
 
 
 def _selection_model(
@@ -158,6 +178,34 @@ def _normalize_model(model: str, definition: ProviderDefinition) -> str:
     if prefix is None or model.startswith(f"{prefix}/"):
         return model
     return f"{prefix}/{model}"
+
+
+def _api_key_env_name(
+    selection: ProviderSelection,
+    definition: ProviderDefinition,
+) -> str:
+    env_name = selection.api_key_env or definition.default_api_key_env
+    if not env_name:
+        raise ProviderConfigError(
+            f"provider {definition.id!r} requires an API key env var name"
+        )
+    return env_name
+
+
+def _require_api_key_env(
+    selection: ProviderSelection,
+    definition: ProviderDefinition,
+    *,
+    env: Mapping[str, str] | None,
+) -> str:
+    env_name = _api_key_env_name(selection, definition)
+    values = os.environ if env is None else env
+    if not values.get(env_name):
+        raise MissingProviderCredentialError(
+            f"provider {definition.id!r} requires environment variable "
+            f"{env_name} to be set"
+        )
+    return env_name
 
 
 def _build_codex_lm(selection: ProviderSelection, definition: ProviderDefinition) -> Any:
@@ -183,19 +231,8 @@ def _build_custom_openai_lm(
     *,
     env: Mapping[str, str] | None,
 ) -> Any:
-    if not selection.base_url:
-        raise ProviderConfigError("custom OpenAI-compatible provider requires base_url")
-    if not selection.api_key_env:
-        raise ProviderConfigError(
-            "custom OpenAI-compatible provider requires api_key_env"
-        )
-
-    values = os.environ if env is None else env
-    api_key = values.get(selection.api_key_env)
-    if not api_key:
-        raise ProviderConfigError(
-            "custom OpenAI-compatible provider requires configured API key env var"
-        )
+    base_url = _validate_custom_openai_selection(selection, env=env)
+    api_key = (os.environ if env is None else env)[selection.api_key_env or ""]
 
     try:
         import dspy
@@ -204,6 +241,31 @@ def _build_custom_openai_lm(
 
     return dspy.LM(
         model=_normalize_model(_selection_model(selection, definition), definition),
-        api_base=selection.base_url,
+        api_base=base_url,
         api_key=api_key,
     )
+
+
+def _validate_custom_openai_selection(
+    selection: ProviderSelection,
+    *,
+    env: Mapping[str, str] | None,
+) -> str:
+    definition = get_provider(CUSTOM_OPENAI_COMPATIBLE)
+    if not selection.model:
+        raise ProviderConfigError("custom OpenAI-compatible provider requires model")
+    if not selection.base_url:
+        raise ProviderConfigError("custom OpenAI-compatible provider requires base_url")
+    base_url = selection.base_url.strip()
+    parsed = urlparse(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ProviderConfigError(
+            "custom OpenAI-compatible provider requires base_url to be an "
+            "HTTP(S) URL"
+        )
+    if not selection.api_key_env:
+        raise ProviderConfigError(
+            "custom OpenAI-compatible provider requires api_key_env"
+        )
+    _require_api_key_env(selection, definition, env=env)
+    return base_url

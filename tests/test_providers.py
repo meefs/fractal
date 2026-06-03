@@ -69,9 +69,53 @@ def test_api_backed_providers_normalize_model_strings(
     model: str,
     expected: str,
 ) -> None:
-    from fractal.providers import ProviderSelection, build_lm
+    from fractal.providers import get_provider, ProviderSelection, build_lm
 
-    assert build_lm(ProviderSelection(provider, model=model)) == expected
+    env_name = get_provider(provider).default_api_key_env
+    assert env_name is not None
+
+    assert (
+        build_lm(
+            ProviderSelection(provider, model=model),
+            env={env_name: "secret-value"},
+        )
+        == expected
+    )
+
+
+@pytest.mark.parametrize(
+    ("provider", "env_name"),
+    [
+        ("openai-api", "OPENAI_API_KEY"),
+        ("anthropic", "ANTHROPIC_API_KEY"),
+        ("openrouter", "OPENROUTER_API_KEY"),
+    ],
+)
+def test_api_backed_providers_require_configured_env_vars(
+    provider: str,
+    env_name: str,
+) -> None:
+    from fractal.providers import (
+        MissingProviderCredentialError,
+        ProviderSelection,
+        build_lm,
+        validate_provider_selection,
+    )
+
+    selection = ProviderSelection(provider, model="model-name")
+
+    with pytest.raises(MissingProviderCredentialError) as excinfo:
+        validate_provider_selection(selection, env={})
+
+    message = str(excinfo.value)
+    assert provider in message
+    assert env_name in message
+    assert "secret-value" not in message
+
+    with pytest.raises(MissingProviderCredentialError, match=env_name):
+        build_lm(selection, env={env_name: ""})
+
+    validate_provider_selection(selection, env={env_name: "secret-value"})
 
 
 def test_codex_factory_uses_codex_model_resolver(
@@ -161,12 +205,50 @@ def test_custom_openai_compatible_requires_complete_config() -> None:
             env={"CUSTOM_KEY": "secret"},
         )
 
+    with pytest.raises(ProviderConfigError, match="requires model"):
+        build_lm(
+            ProviderSelection(
+                CUSTOM_OPENAI_COMPATIBLE,
+                api_key_env="CUSTOM_KEY",
+                base_url="https://llm.example.test/v1",
+            ),
+            env={"CUSTOM_KEY": "secret"},
+        )
+
     with pytest.raises(ProviderConfigError, match="requires api_key_env"):
         build_lm(
             ProviderSelection(
                 CUSTOM_OPENAI_COMPATIBLE,
                 model="custom-model",
                 base_url="https://llm.example.test/v1",
+            ),
+            env={"CUSTOM_KEY": "secret"},
+        )
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "not-a-url",
+        "ftp://llm.example.test/v1",
+        "https://",
+    ],
+)
+def test_custom_openai_compatible_validates_base_url_shape(base_url: str) -> None:
+    from fractal.providers import (
+        CUSTOM_OPENAI_COMPATIBLE,
+        ProviderConfigError,
+        ProviderSelection,
+        build_lm,
+    )
+
+    with pytest.raises(ProviderConfigError, match="HTTP\\(S\\) URL"):
+        build_lm(
+            ProviderSelection(
+                CUSTOM_OPENAI_COMPATIBLE,
+                model="custom-model",
+                api_key_env="CUSTOM_KEY",
+                base_url=base_url,
             ),
             env={"CUSTOM_KEY": "secret"},
         )
@@ -203,7 +285,7 @@ def test_custom_openai_compatible_reads_key_from_env_without_leaking_value(
         build_lm(selection, env={"CUSTOM_KEY": ""})
 
     assert "secret-value" not in str(excinfo.value)
-    assert "CUSTOM_KEY" not in str(excinfo.value)
+    assert "CUSTOM_KEY" in str(excinfo.value)
 
     lm = build_lm(selection, env={"CUSTOM_KEY": "secret-value"})
 
