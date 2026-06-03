@@ -6,6 +6,52 @@ from types import ModuleType, SimpleNamespace
 import pytest
 
 
+def install_fake_codex_modules(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    auth_path: object = "/tmp/codex-auth.json",
+    load_auth_error: Exception | None = None,
+) -> dict[str, object]:
+    calls: dict[str, object] = {}
+
+    class FakeCodexLM:
+        def __init__(self, *, model: str, auth_path: object | None = None) -> None:
+            calls["model"] = model
+            calls["auth_path"] = auth_path
+
+    class FakeUnsupportedModelError(RuntimeError):
+        pass
+
+    def resolve_codex_model(model: str) -> str:
+        calls["requested"] = model
+        if model == "gpt-4o":
+            raise FakeUnsupportedModelError(f"cannot route {model!r}")
+        return "resolved-codex-model"
+
+    def load_codex_auth(path: object) -> tuple[str, str]:
+        calls["load_auth_path"] = path
+        if load_auth_error is not None:
+            raise load_auth_error
+        return ("secret-token", "acct-123")
+
+    codex_module = ModuleType("dspy_codex_lm")
+    codex_module.CodexLM = FakeCodexLM
+
+    cli_module = ModuleType("dspy_codex_lm.cli")
+    cli_module.CodexLMUnsupportedModelError = FakeUnsupportedModelError
+    cli_module.resolve_codex_model = resolve_codex_model
+
+    auth_module = ModuleType("dspy_codex_lm.auth")
+    auth_module.codex_auth_path = lambda: auth_path
+    auth_module.load_codex_auth = load_codex_auth
+
+    monkeypatch.setitem(sys.modules, "dspy_codex_lm", codex_module)
+    monkeypatch.setitem(sys.modules, "dspy_codex_lm.cli", cli_module)
+    monkeypatch.setitem(sys.modules, "dspy_codex_lm.auth", auth_module)
+    monkeypatch.setattr("fractal.providers.shutil.which", lambda name: "/bin/codex")
+    return calls
+
+
 def test_registry_contains_initial_provider_set() -> None:
     from fractal.providers import (
         ANTHROPIC,
@@ -123,36 +169,17 @@ def test_codex_factory_uses_codex_model_resolver(
 ) -> None:
     from fractal.providers import OPENAI_CODEX, ProviderSelection, build_lm
 
-    calls: dict[str, object] = {}
-
-    class FakeCodexLM:
-        def __init__(self, *, model: str) -> None:
-            calls["model"] = model
-
-    codex_module = ModuleType("dspy_codex_lm")
-    codex_module.CodexLM = FakeCodexLM
-
-    cli_module = ModuleType("dspy_codex_lm.cli")
-
-    class FakeUnsupportedModelError(RuntimeError):
-        pass
-
-    def resolve_codex_model(model: str) -> str:
-        calls["requested"] = model
-        return "resolved-codex-model"
-
-    cli_module.CodexLMUnsupportedModelError = FakeUnsupportedModelError
-    cli_module.resolve_codex_model = resolve_codex_model
-
-    monkeypatch.setitem(sys.modules, "dspy_codex_lm", codex_module)
-    monkeypatch.setitem(sys.modules, "dspy_codex_lm.cli", cli_module)
+    auth_path = object()
+    calls = install_fake_codex_modules(monkeypatch, auth_path=auth_path)
 
     lm = build_lm(ProviderSelection(OPENAI_CODEX, model="openai/gpt-5.3-codex"))
 
-    assert isinstance(lm, FakeCodexLM)
+    assert type(lm).__name__ == "FakeCodexLM"
     assert calls == {
         "requested": "openai/gpt-5.3-codex",
+        "load_auth_path": auth_path,
         "model": "resolved-codex-model",
+        "auth_path": auth_path,
     }
 
 
@@ -166,25 +193,78 @@ def test_codex_factory_reports_unsupported_model(
         build_lm,
     )
 
-    codex_module = ModuleType("dspy_codex_lm")
-    codex_module.CodexLM = object
-
-    cli_module = ModuleType("dspy_codex_lm.cli")
-
-    class FakeUnsupportedModelError(RuntimeError):
-        pass
-
-    def resolve_codex_model(model: str) -> str:
-        raise FakeUnsupportedModelError(f"cannot route {model!r}")
-
-    cli_module.CodexLMUnsupportedModelError = FakeUnsupportedModelError
-    cli_module.resolve_codex_model = resolve_codex_model
-
-    monkeypatch.setitem(sys.modules, "dspy_codex_lm", codex_module)
-    monkeypatch.setitem(sys.modules, "dspy_codex_lm.cli", cli_module)
+    calls = install_fake_codex_modules(monkeypatch)
 
     with pytest.raises(UnsupportedProviderModelError, match="cannot route 'gpt-4o'"):
         build_lm(ProviderSelection(OPENAI_CODEX, model="gpt-4o"))
+
+    assert "load_auth_path" not in calls
+
+
+def test_codex_validation_requires_official_codex_cli(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fractal.providers import (
+        MissingCodexCliError,
+        OPENAI_CODEX,
+        ProviderSelection,
+        validate_provider_selection,
+    )
+
+    install_fake_codex_modules(monkeypatch)
+    monkeypatch.setattr("fractal.providers.shutil.which", lambda name: None)
+
+    with pytest.raises(MissingCodexCliError) as excinfo:
+        validate_provider_selection(ProviderSelection(OPENAI_CODEX))
+
+    message = str(excinfo.value)
+    assert "codex" in message
+    assert "codex login --device-auth" in message
+    assert "secret-token" not in message
+
+
+def test_codex_validation_requires_usable_codex_cli_auth(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fractal.providers import (
+        MissingCodexAuthError,
+        OPENAI_CODEX,
+        ProviderSelection,
+        build_lm,
+    )
+
+    auth_path = "/tmp/fake-codex-auth.json"
+    install_fake_codex_modules(
+        monkeypatch,
+        auth_path=auth_path,
+        load_auth_error=FileNotFoundError(auth_path),
+    )
+
+    with pytest.raises(MissingCodexAuthError) as excinfo:
+        build_lm(ProviderSelection(OPENAI_CODEX))
+
+    message = str(excinfo.value)
+    assert auth_path in message
+    assert "codex login --device-auth" in message
+    assert "secret-token" not in message
+
+
+def test_codex_validation_rejects_non_cli_auth_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fractal.providers import (
+        OPENAI_CODEX,
+        ProviderConfigError,
+        ProviderSelection,
+        validate_provider_selection,
+    )
+
+    install_fake_codex_modules(monkeypatch)
+
+    with pytest.raises(ProviderConfigError, match="auth_source='codex-cli'"):
+        validate_provider_selection(
+            ProviderSelection(OPENAI_CODEX, auth_source="codex-lm-profile")
+        )
 
 
 def test_custom_openai_compatible_requires_complete_config() -> None:

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
+import shutil
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 from urllib.parse import urlparse
@@ -33,6 +35,14 @@ class UnsupportedProviderModelError(ProviderError):
 
 class MissingProviderCredentialError(ProviderConfigError):
     """Raised when a provider's configured credential source is unavailable."""
+
+
+class MissingCodexCliError(ProviderConfigError):
+    """Raised when the official Codex CLI is required but unavailable."""
+
+
+class MissingCodexAuthError(MissingProviderCredentialError):
+    """Raised when official Codex CLI auth is missing or unusable."""
 
 
 @dataclass(frozen=True)
@@ -156,6 +166,10 @@ def validate_provider_selection(
 ) -> None:
     definition = get_provider(selection.provider)
     _selection_model(selection, definition)
+    if definition.id == OPENAI_CODEX:
+        _resolve_codex_model(selection, definition)
+        _codex_cli_auth_path(selection)
+        return
     if definition.id == CUSTOM_OPENAI_COMPATIBLE:
         _validate_custom_openai_selection(selection, env=env)
         return
@@ -209,8 +223,23 @@ def _require_api_key_env(
 
 
 def _build_codex_lm(selection: ProviderSelection, definition: ProviderDefinition) -> Any:
+    codex_model = _resolve_codex_model(selection, definition)
+    auth_path = _codex_cli_auth_path(selection)
     try:
         from dspy_codex_lm import CodexLM
+    except ImportError as exc:
+        raise ProviderConfigError(
+            "openai-codex requires PredictRLM's dspy_codex_lm integration"
+        ) from exc
+
+    return CodexLM(model=codex_model, auth_path=auth_path)
+
+
+def _resolve_codex_model(
+    selection: ProviderSelection,
+    definition: ProviderDefinition,
+) -> str:
+    try:
         from dspy_codex_lm.cli import CodexLMUnsupportedModelError, resolve_codex_model
     except ImportError as exc:
         raise ProviderConfigError(
@@ -219,10 +248,42 @@ def _build_codex_lm(selection: ProviderSelection, definition: ProviderDefinition
 
     model = _selection_model(selection, definition)
     try:
-        codex_model = resolve_codex_model(model)
+        return resolve_codex_model(model)
     except CodexLMUnsupportedModelError as exc:
         raise UnsupportedProviderModelError(str(exc)) from exc
-    return CodexLM(model=codex_model)
+
+
+def _codex_cli_auth_path(selection: ProviderSelection) -> Path:
+    if selection.auth_source not in {None, "codex-cli"}:
+        raise ProviderConfigError(
+            "openai-codex requires auth_source='codex-cli'"
+        )
+    if shutil.which("codex") is None:
+        raise MissingCodexCliError(
+            "openai-codex requires the official `codex` CLI. "
+            "Install it, then run `codex login --device-auth`."
+        )
+    try:
+        from dspy_codex_lm.auth import codex_auth_path, load_codex_auth
+    except ImportError as exc:
+        raise ProviderConfigError(
+            "openai-codex requires PredictRLM's dspy_codex_lm integration"
+        ) from exc
+
+    auth_path = codex_auth_path()
+    try:
+        load_codex_auth(auth_path)
+    except FileNotFoundError as exc:
+        raise MissingCodexAuthError(
+            f"openai-codex could not find Codex CLI auth at {auth_path}. "
+            "Run `codex login --device-auth`."
+        ) from exc
+    except Exception as exc:
+        raise MissingCodexAuthError(
+            f"openai-codex found unusable Codex CLI auth at {auth_path}. "
+            "Run `codex login --device-auth` again."
+        ) from exc
+    return auth_path
 
 
 def _build_custom_openai_lm(
