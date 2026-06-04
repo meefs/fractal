@@ -46,7 +46,7 @@ def config_show(*, stdout: TextIO, stderr: TextIO) -> int:
 
 def config_status(*, stdout: TextIO, stderr: TextIO) -> int:
     from .config import FractalConfigError, load_config, render_config
-    from .providers import ProviderError, validate_provider_selection
+    from .providers import ProviderError, check_provider_readiness
 
     try:
         result = load_config()
@@ -63,7 +63,7 @@ def config_status(*, stdout: TextIO, stderr: TextIO) -> int:
 
     selection = selection_from_config(result.config, path=result.path)
     try:
-        validate_provider_selection(selection)
+        check_provider_readiness(selection)
     except ProviderError as exc:
         print("Fractal config status: invalid", file=stdout)
         print(render_config(result.config, path=result.path), file=stdout)
@@ -81,12 +81,12 @@ def config_status(*, stdout: TextIO, stderr: TextIO) -> int:
 
 def config_setup(*, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
     from .config import FractalConfigError, write_config
-    from .providers import ProviderError, validate_provider_selection
+    from .providers import ProviderError, check_provider_readiness
 
     try:
         config = prompt_for_config(stdin=stdin, stdout=stdout)
         selection = selection_from_config(config)
-        validate_provider_selection(selection)
+        check_provider_readiness(selection)
         path = write_config(config)
     except (FractalConfigError, ProviderError, SetupInputError, ValueError) as exc:
         print(f"fractal config setup: {exc}", file=stderr)

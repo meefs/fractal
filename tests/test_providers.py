@@ -145,13 +145,15 @@ def test_api_backed_providers_require_configured_env_vars(
         MissingProviderCredentialError,
         ProviderSelection,
         build_lm,
+        check_provider_readiness,
         validate_provider_selection,
     )
 
     selection = ProviderSelection(provider, model="model-name")
+    validate_provider_selection(selection)
 
     with pytest.raises(MissingProviderCredentialError) as excinfo:
-        validate_provider_selection(selection, env={})
+        check_provider_readiness(selection, env={})
 
     message = str(excinfo.value)
     assert provider in message
@@ -161,7 +163,7 @@ def test_api_backed_providers_require_configured_env_vars(
     with pytest.raises(MissingProviderCredentialError, match=env_name):
         build_lm(selection, env={env_name: ""})
 
-    validate_provider_selection(selection, env={env_name: "secret-value"})
+    check_provider_readiness(selection, env={env_name: "secret-value"})
 
 
 def test_codex_factory_uses_codex_model_resolver(
@@ -205,17 +207,17 @@ def test_codex_validation_requires_official_codex_cli(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from fractal.providers import (
+        check_provider_readiness,
         MissingCodexCliError,
         OPENAI_CODEX,
         ProviderSelection,
-        validate_provider_selection,
     )
 
     install_fake_codex_modules(monkeypatch)
     monkeypatch.setattr("fractal.providers.shutil.which", lambda name: None)
 
     with pytest.raises(MissingCodexCliError) as excinfo:
-        validate_provider_selection(ProviderSelection(OPENAI_CODEX))
+        check_provider_readiness(ProviderSelection(OPENAI_CODEX))
 
     message = str(excinfo.value)
     assert "codex" in message
@@ -253,16 +255,16 @@ def test_codex_validation_rejects_non_cli_auth_source(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from fractal.providers import (
+        check_provider_readiness,
         OPENAI_CODEX,
         ProviderConfigError,
         ProviderSelection,
-        validate_provider_selection,
     )
 
     install_fake_codex_modules(monkeypatch)
 
     with pytest.raises(ProviderConfigError, match="auth_source='codex-cli'"):
-        validate_provider_selection(
+        check_provider_readiness(
             ProviderSelection(OPENAI_CODEX, auth_source="codex-lm-profile")
         )
 

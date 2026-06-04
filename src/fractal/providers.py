@@ -59,7 +59,13 @@ class ProviderSelection:
 
 
 class ProviderBehavior(Protocol):
-    def validate_selection(
+    def validate_shape(
+        self,
+        selection: ProviderSelection,
+        definition: "ProviderDefinition",
+    ) -> None: ...
+
+    def check_readiness(
         self,
         selection: ProviderSelection,
         definition: "ProviderDefinition",
@@ -91,13 +97,19 @@ class ProviderDefinition:
     base_url_label: str | None = None
     setup_messages: tuple[str, ...] = ()
 
-    def validate_selection(
+    def validate_shape(
+        self,
+        selection: ProviderSelection,
+    ) -> None:
+        self.behavior.validate_shape(selection, self)
+
+    def check_readiness(
         self,
         selection: ProviderSelection,
         *,
         env: Mapping[str, str] | None = None,
     ) -> None:
-        self.behavior.validate_selection(selection, self, env=env)
+        self.behavior.check_readiness(selection, self, env=env)
 
     def build_lm(
         self,
@@ -108,16 +120,41 @@ class ProviderDefinition:
         return self.behavior.build_lm(selection, self, env=env)
 
 
+@dataclass(frozen=True)
+class ApiKeyStringLMRuntime:
+    model: str
+
+
+@dataclass(frozen=True)
+class CodexLMRuntime:
+    model: str
+    auth_path: Path
+
+
+@dataclass(frozen=True)
+class CustomOpenAIRuntime:
+    model: str
+    base_url: str
+    api_key: str
+
+
 class ApiKeyStringLMBehavior:
-    def validate_selection(
+    def validate_shape(
+        self,
+        selection: ProviderSelection,
+        definition: ProviderDefinition,
+    ) -> None:
+        _selection_model(selection, definition)
+        _api_key_env_name(selection, definition)
+
+    def check_readiness(
         self,
         selection: ProviderSelection,
         definition: ProviderDefinition,
         *,
         env: Mapping[str, str] | None,
     ) -> None:
-        _selection_model(selection, definition)
-        _require_api_key_env(selection, definition, env=env)
+        self._runtime(selection, definition, env=env)
 
     def build_lm(
         self,
@@ -126,21 +163,38 @@ class ApiKeyStringLMBehavior:
         *,
         env: Mapping[str, str] | None,
     ) -> str:
-        self.validate_selection(selection, definition, env=env)
-        return _normalize_model(_selection_model(selection, definition), definition)
+        return self._runtime(selection, definition, env=env).model
+
+    def _runtime(
+        self,
+        selection: ProviderSelection,
+        definition: ProviderDefinition,
+        *,
+        env: Mapping[str, str] | None,
+    ) -> ApiKeyStringLMRuntime:
+        self.validate_shape(selection, definition)
+        _require_api_key_env(selection, definition, env=env)
+        return ApiKeyStringLMRuntime(
+            model=_normalize_model(_selection_model(selection, definition), definition)
+        )
 
 
 class CodexCliLMBehavior:
-    def validate_selection(
+    def validate_shape(
+        self,
+        selection: ProviderSelection,
+        definition: ProviderDefinition,
+    ) -> None:
+        _selection_model(selection, definition)
+
+    def check_readiness(
         self,
         selection: ProviderSelection,
         definition: ProviderDefinition,
         *,
         env: Mapping[str, str] | None,
     ) -> None:
-        _selection_model(selection, definition)
-        _resolve_codex_model(selection, definition)
-        _codex_cli_auth_path(selection)
+        self._runtime(selection, definition)
 
     def build_lm(
         self,
@@ -149,8 +203,7 @@ class CodexCliLMBehavior:
         *,
         env: Mapping[str, str] | None,
     ) -> RuntimeLM:
-        codex_model = _resolve_codex_model(selection, definition)
-        auth_path = _codex_cli_auth_path(selection)
+        runtime = self._runtime(selection, definition)
         try:
             from dspy_codex_lm import CodexLM
         except ImportError as exc:
@@ -158,18 +211,36 @@ class CodexCliLMBehavior:
                 "openai-codex requires PredictRLM's dspy_codex_lm integration"
             ) from exc
 
-        return CodexLM(model=codex_model, auth_path=auth_path)
+        return CodexLM(model=runtime.model, auth_path=runtime.auth_path)
+
+    def _runtime(
+        self,
+        selection: ProviderSelection,
+        definition: ProviderDefinition,
+    ) -> CodexLMRuntime:
+        self.validate_shape(selection, definition)
+        return CodexLMRuntime(
+            model=_resolve_codex_model(selection, definition),
+            auth_path=_codex_cli_auth_path(selection),
+        )
 
 
 class CustomOpenAICompatibleBehavior:
-    def validate_selection(
+    def validate_shape(
+        self,
+        selection: ProviderSelection,
+        definition: ProviderDefinition,
+    ) -> None:
+        _custom_openai_base_url(selection)
+
+    def check_readiness(
         self,
         selection: ProviderSelection,
         definition: ProviderDefinition,
         *,
         env: Mapping[str, str] | None,
     ) -> None:
-        _validate_custom_openai_selection(selection, definition, env=env)
+        self._runtime(selection, definition, env=env)
 
     def build_lm(
         self,
@@ -178,8 +249,7 @@ class CustomOpenAICompatibleBehavior:
         *,
         env: Mapping[str, str] | None,
     ) -> RuntimeLM:
-        base_url = _validate_custom_openai_selection(selection, definition, env=env)
-        api_key = (os.environ if env is None else env)[selection.api_key_env or ""]
+        runtime = self._runtime(selection, definition, env=env)
 
         try:
             import dspy
@@ -189,9 +259,25 @@ class CustomOpenAICompatibleBehavior:
             ) from exc
 
         return dspy.LM(
+            model=runtime.model,
+            api_base=runtime.base_url,
+            api_key=runtime.api_key,
+        )
+
+    def _runtime(
+        self,
+        selection: ProviderSelection,
+        definition: ProviderDefinition,
+        *,
+        env: Mapping[str, str] | None,
+    ) -> CustomOpenAIRuntime:
+        base_url = _custom_openai_base_url(selection)
+        env_name = _require_api_key_env(selection, definition, env=env)
+        values = os.environ if env is None else env
+        return CustomOpenAIRuntime(
             model=_normalize_model(_selection_model(selection, definition), definition),
-            api_base=base_url,
-            api_key=api_key,
+            base_url=base_url,
+            api_key=values[env_name],
         )
 
 
@@ -305,10 +391,16 @@ def build_lm(
 
 def validate_provider_selection(
     selection: ProviderSelection,
+) -> None:
+    get_provider(selection.provider).validate_shape(selection)
+
+
+def check_provider_readiness(
+    selection: ProviderSelection,
     *,
     env: Mapping[str, str] | None = None,
 ) -> None:
-    get_provider(selection.provider).validate_selection(selection, env=env)
+    get_provider(selection.provider).check_readiness(selection, env=env)
 
 
 def _selection_model(
@@ -407,11 +499,8 @@ def _codex_cli_auth_path(selection: ProviderSelection) -> Path:
     return auth_path
 
 
-def _validate_custom_openai_selection(
+def _custom_openai_base_url(
     selection: ProviderSelection,
-    definition: ProviderDefinition,
-    *,
-    env: Mapping[str, str] | None,
 ) -> str:
     if not selection.model:
         raise ProviderConfigError("custom OpenAI-compatible provider requires model")
@@ -428,5 +517,4 @@ def _validate_custom_openai_selection(
         raise ProviderConfigError(
             "custom OpenAI-compatible provider requires api_key_env"
         )
-    _require_api_key_env(selection, definition, env=env)
     return base_url
