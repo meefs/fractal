@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Literal, Protocol
 from urllib.parse import urlparse
 
 
@@ -15,6 +15,8 @@ OPENAI_API = "openai-api"
 ANTHROPIC = "anthropic"
 OPENROUTER = "openrouter"
 CUSTOM_OPENAI_COMPATIBLE = "custom-openai-compatible"
+ProviderAuthType = Literal["api_key_env", "codex_cli"]
+ProviderAuthSource = Literal["env", "codex-cli"]
 
 
 class ProviderError(ValueError):
@@ -46,18 +48,6 @@ class MissingCodexAuthError(MissingProviderCredentialError):
 
 
 @dataclass(frozen=True)
-class ProviderDefinition:
-    id: str
-    display_name: str
-    auth_type: str
-    default_model: str
-    model_examples: tuple[str, ...] = ()
-    default_api_key_env: str | None = None
-    model_prefix: str | None = None
-    supports_base_url: bool = False
-
-
-@dataclass(frozen=True)
 class ProviderSelection:
     provider: str
     model: str | None = None
@@ -66,23 +56,173 @@ class ProviderSelection:
     auth_source: str | None = None
 
 
+class ProviderBehavior(Protocol):
+    def validate_selection(
+        self,
+        selection: ProviderSelection,
+        definition: "ProviderDefinition",
+        *,
+        env: Mapping[str, str] | None,
+    ) -> None: ...
+
+    def build_lm(
+        self,
+        selection: ProviderSelection,
+        definition: "ProviderDefinition",
+        *,
+        env: Mapping[str, str] | None,
+    ) -> Any: ...
+
+
+@dataclass(frozen=True)
+class ProviderDefinition:
+    id: str
+    display_name: str
+    auth_type: ProviderAuthType
+    auth_source: ProviderAuthSource
+    default_model: str
+    behavior: ProviderBehavior
+    model_examples: tuple[str, ...] = ()
+    default_api_key_env: str | None = None
+    model_prefix: str | None = None
+    supports_base_url: bool = False
+    base_url_label: str | None = None
+    setup_messages: tuple[str, ...] = ()
+
+    def validate_selection(
+        self,
+        selection: ProviderSelection,
+        *,
+        env: Mapping[str, str] | None = None,
+    ) -> None:
+        self.behavior.validate_selection(selection, self, env=env)
+
+    def build_lm(
+        self,
+        selection: ProviderSelection,
+        *,
+        env: Mapping[str, str] | None = None,
+    ) -> Any:
+        return self.behavior.build_lm(selection, self, env=env)
+
+
+class ApiKeyStringLMBehavior:
+    def validate_selection(
+        self,
+        selection: ProviderSelection,
+        definition: ProviderDefinition,
+        *,
+        env: Mapping[str, str] | None,
+    ) -> None:
+        _selection_model(selection, definition)
+        _require_api_key_env(selection, definition, env=env)
+
+    def build_lm(
+        self,
+        selection: ProviderSelection,
+        definition: ProviderDefinition,
+        *,
+        env: Mapping[str, str] | None,
+    ) -> str:
+        self.validate_selection(selection, definition, env=env)
+        return _normalize_model(_selection_model(selection, definition), definition)
+
+
+class CodexCliLMBehavior:
+    def validate_selection(
+        self,
+        selection: ProviderSelection,
+        definition: ProviderDefinition,
+        *,
+        env: Mapping[str, str] | None,
+    ) -> None:
+        _selection_model(selection, definition)
+        _resolve_codex_model(selection, definition)
+        _codex_cli_auth_path(selection)
+
+    def build_lm(
+        self,
+        selection: ProviderSelection,
+        definition: ProviderDefinition,
+        *,
+        env: Mapping[str, str] | None,
+    ) -> Any:
+        codex_model = _resolve_codex_model(selection, definition)
+        auth_path = _codex_cli_auth_path(selection)
+        try:
+            from dspy_codex_lm import CodexLM
+        except ImportError as exc:
+            raise ProviderConfigError(
+                "openai-codex requires PredictRLM's dspy_codex_lm integration"
+            ) from exc
+
+        return CodexLM(model=codex_model, auth_path=auth_path)
+
+
+class CustomOpenAICompatibleBehavior:
+    def validate_selection(
+        self,
+        selection: ProviderSelection,
+        definition: ProviderDefinition,
+        *,
+        env: Mapping[str, str] | None,
+    ) -> None:
+        _validate_custom_openai_selection(selection, definition, env=env)
+
+    def build_lm(
+        self,
+        selection: ProviderSelection,
+        definition: ProviderDefinition,
+        *,
+        env: Mapping[str, str] | None,
+    ) -> Any:
+        base_url = _validate_custom_openai_selection(selection, definition, env=env)
+        api_key = (os.environ if env is None else env)[selection.api_key_env or ""]
+
+        try:
+            import dspy
+        except ImportError as exc:
+            raise ProviderConfigError(
+                "custom OpenAI-compatible provider requires DSPy"
+            ) from exc
+
+        return dspy.LM(
+            model=_normalize_model(_selection_model(selection, definition), definition),
+            api_base=base_url,
+            api_key=api_key,
+        )
+
+
+_API_KEY_STRING_LM = ApiKeyStringLMBehavior()
+_CODEX_CLI_LM = CodexCliLMBehavior()
+_CUSTOM_OPENAI_COMPATIBLE_LM = CustomOpenAICompatibleBehavior()
+
+
 _PROVIDERS: dict[str, ProviderDefinition] = {
     OPENAI_CODEX: ProviderDefinition(
         id=OPENAI_CODEX,
         display_name="OpenAI Codex",
         auth_type="codex_cli",
+        auth_source="codex-cli",
         default_model="gpt-5.3-codex",
+        behavior=_CODEX_CLI_LM,
         model_examples=(
             "gpt-5.3-codex",
             "gpt-5.4-mini",
             "gpt-5.5",
+        ),
+        setup_messages=(
+            "OpenAI Codex uses the official Codex CLI auth store.",
+            "If needed, run `codex login --device-auth` before continuing.",
         ),
     ),
     OPENAI_API: ProviderDefinition(
         id=OPENAI_API,
         display_name="OpenAI API",
         auth_type="api_key_env",
+        auth_source="env",
         default_model="gpt-5.5",
+        behavior=_API_KEY_STRING_LM,
         model_examples=("gpt-5.5", "gpt-5.4-mini"),
         default_api_key_env="OPENAI_API_KEY",
         model_prefix="openai",
@@ -91,7 +231,9 @@ _PROVIDERS: dict[str, ProviderDefinition] = {
         id=ANTHROPIC,
         display_name="Anthropic",
         auth_type="api_key_env",
+        auth_source="env",
         default_model="claude-sonnet-4-5",
+        behavior=_API_KEY_STRING_LM,
         model_examples=("claude-sonnet-4-5", "claude-haiku-4-5"),
         default_api_key_env="ANTHROPIC_API_KEY",
         model_prefix="anthropic",
@@ -100,7 +242,9 @@ _PROVIDERS: dict[str, ProviderDefinition] = {
         id=OPENROUTER,
         display_name="OpenRouter",
         auth_type="api_key_env",
+        auth_source="env",
         default_model="openai/gpt-5.5",
+        behavior=_API_KEY_STRING_LM,
         model_examples=("openai/gpt-5.5", "anthropic/claude-sonnet-4-5"),
         default_api_key_env="OPENROUTER_API_KEY",
         model_prefix="openrouter",
@@ -109,9 +253,13 @@ _PROVIDERS: dict[str, ProviderDefinition] = {
         id=CUSTOM_OPENAI_COMPATIBLE,
         display_name="Custom OpenAI-compatible",
         auth_type="api_key_env",
+        auth_source="env",
         default_model="model-name",
+        behavior=_CUSTOM_OPENAI_COMPATIBLE_LM,
         model_examples=("gpt-oss-120b", "qwen3-coder"),
+        default_api_key_env="CUSTOM_OPENAI_API_KEY",
         supports_base_url=True,
+        base_url_label="OpenAI-compatible base URL",
         model_prefix="openai",
     ),
 }
@@ -150,13 +298,7 @@ def build_lm(
     *,
     env: Mapping[str, str] | None = None,
 ) -> Any:
-    definition = get_provider(selection.provider)
-    if definition.id == OPENAI_CODEX:
-        return _build_codex_lm(selection, definition)
-    if definition.id == CUSTOM_OPENAI_COMPATIBLE:
-        return _build_custom_openai_lm(selection, definition, env=env)
-    validate_provider_selection(selection, env=env)
-    return _normalize_model(_selection_model(selection, definition), definition)
+    return get_provider(selection.provider).build_lm(selection, env=env)
 
 
 def validate_provider_selection(
@@ -164,17 +306,7 @@ def validate_provider_selection(
     *,
     env: Mapping[str, str] | None = None,
 ) -> None:
-    definition = get_provider(selection.provider)
-    _selection_model(selection, definition)
-    if definition.id == OPENAI_CODEX:
-        _resolve_codex_model(selection, definition)
-        _codex_cli_auth_path(selection)
-        return
-    if definition.id == CUSTOM_OPENAI_COMPATIBLE:
-        _validate_custom_openai_selection(selection, env=env)
-        return
-    if definition.auth_type == "api_key_env":
-        _require_api_key_env(selection, definition, env=env)
+    get_provider(selection.provider).validate_selection(selection, env=env)
 
 
 def _selection_model(
@@ -220,19 +352,6 @@ def _require_api_key_env(
             f"{env_name} to be set"
         )
     return env_name
-
-
-def _build_codex_lm(selection: ProviderSelection, definition: ProviderDefinition) -> Any:
-    codex_model = _resolve_codex_model(selection, definition)
-    auth_path = _codex_cli_auth_path(selection)
-    try:
-        from dspy_codex_lm import CodexLM
-    except ImportError as exc:
-        raise ProviderConfigError(
-            "openai-codex requires PredictRLM's dspy_codex_lm integration"
-        ) from exc
-
-    return CodexLM(model=codex_model, auth_path=auth_path)
 
 
 def _resolve_codex_model(
@@ -286,33 +405,12 @@ def _codex_cli_auth_path(selection: ProviderSelection) -> Path:
     return auth_path
 
 
-def _build_custom_openai_lm(
+def _validate_custom_openai_selection(
     selection: ProviderSelection,
     definition: ProviderDefinition,
     *,
     env: Mapping[str, str] | None,
-) -> Any:
-    base_url = _validate_custom_openai_selection(selection, env=env)
-    api_key = (os.environ if env is None else env)[selection.api_key_env or ""]
-
-    try:
-        import dspy
-    except ImportError as exc:
-        raise ProviderConfigError("custom OpenAI-compatible provider requires DSPy") from exc
-
-    return dspy.LM(
-        model=_normalize_model(_selection_model(selection, definition), definition),
-        api_base=base_url,
-        api_key=api_key,
-    )
-
-
-def _validate_custom_openai_selection(
-    selection: ProviderSelection,
-    *,
-    env: Mapping[str, str] | None,
 ) -> str:
-    definition = get_provider(CUSTOM_OPENAI_COMPATIBLE)
     if not selection.model:
         raise ProviderConfigError("custom OpenAI-compatible provider requires model")
     if not selection.base_url:

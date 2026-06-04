@@ -74,49 +74,38 @@ def _prompt_provider_settings(
     provider_id: str,
 ) -> Any:
     from .config import ProviderConfig
-    from .providers import (
-        CUSTOM_OPENAI_COMPATIBLE,
-        OPENAI_CODEX,
-        get_provider,
-    )
+    from .providers import get_provider
 
     provider = get_provider(provider_id)
-    if provider.id == OPENAI_CODEX:
-        print("OpenAI Codex uses the official Codex CLI auth store.", file=stdout)
-        print(
-            "If needed, run `codex login --device-auth` before continuing.",
-            file=stdout,
-        )
-        return ProviderConfig(auth_source="codex-cli")
+    for message in provider.setup_messages:
+        print(message, file=stdout)
 
-    if provider.id == CUSTOM_OPENAI_COMPATIBLE:
+    base_url = None
+    if provider.base_url_label is not None:
         base_url = _prompt_required(
             stdin=stdin,
             stdout=stdout,
-            label="OpenAI-compatible base URL",
-        )
-        api_key_env = _prompt(
-            stdin=stdin,
-            stdout=stdout,
-            label="API key environment variable",
-            default="CUSTOM_OPENAI_API_KEY",
-        )
-        return ProviderConfig(
-            auth_source="env",
-            api_key_env=api_key_env,
-            base_url=base_url,
+            label=provider.base_url_label,
         )
 
+    api_key_env = None
     if provider.auth_type == "api_key_env":
+        if provider.default_api_key_env is None:
+            raise SetupInputError(
+                f"provider {provider.id!r} requires a default API key env var"
+            )
         api_key_env = _prompt(
             stdin=stdin,
             stdout=stdout,
             label="API key environment variable",
             default=provider.default_api_key_env,
         )
-        return ProviderConfig(auth_source="env", api_key_env=api_key_env)
 
-    raise SetupInputError(f"provider {provider.id!r} is not supported by setup")
+    return ProviderConfig(
+        auth_source=provider.auth_source,
+        api_key_env=api_key_env,
+        base_url=base_url,
+    )
 
 
 def _prompt(
