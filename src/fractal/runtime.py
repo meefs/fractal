@@ -12,6 +12,7 @@ from predict_rlm.trace import extract_trace_from_exc
 from .agent.schema import FractalIterationEvent, FractalResult
 from .agent.service import FractalAgent, create_sbx_interpreter
 from .events import FractalRuntimeEvent, RuntimeEventTracker
+from .lm_types import RuntimeLM
 from .session import (
     INTERRUPTED_ERROR,
     MAX_ITERATIONS_ERROR,
@@ -61,8 +62,8 @@ class FractalRuntime:
         *,
         workspace_path: str | Path,
         included_paths: list[str | Path] | None = None,
-        lm: str | None,
-        sub_lm: str | None,
+        lm: RuntimeLM | None,
+        sub_lm: RuntimeLM | None,
         max_iterations: int,
         verbose: bool,
         debug: bool,

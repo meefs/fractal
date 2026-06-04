@@ -14,6 +14,7 @@ from .schema import FractalIterationEvent, FractalResult
 from .signature import build_edit_workspace_signature
 from .skills import filesystem_coding_skill
 from ..events import build_predict_runtime_hooks
+from ..lm_types import RuntimeLM
 from ..session import SessionHistoryTurn
 
 
@@ -26,8 +27,8 @@ class FractalAgent(dspy.Module):
 
     def __init__(
         self,
-        lm: dspy.LM | str | None = None,
-        sub_lm: dspy.LM | str | None = None,
+        lm: RuntimeLM | None = None,
+        sub_lm: RuntimeLM | None = None,
         max_iterations: int = 30,
         verbose: bool = True,
         debug: bool = False,

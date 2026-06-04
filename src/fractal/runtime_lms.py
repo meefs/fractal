@@ -2,17 +2,26 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TextIO
+from typing import Protocol, TextIO
+
+from .config import FractalConfig
+from .lm_types import RuntimeLM
+from .providers import ProviderSelection
 
 
 @dataclass(frozen=True)
 class RuntimeLMConfig:
-    lm: Any
-    sub_lm: Any
+    lm: RuntimeLM
+    sub_lm: RuntimeLM | None
+
+
+class RuntimeLMArgs(Protocol):
+    lm: RuntimeLM | None
+    sub_lm: RuntimeLM | None
 
 
 def resolve_runtime_lms(
-    args: Any,
+    args: RuntimeLMArgs,
     *,
     stdin: TextIO,
     stdout: TextIO,
@@ -66,9 +75,12 @@ def resolve_runtime_lms(
     return RuntimeLMConfig(lm=lm, sub_lm=sub_lm)
 
 
-def selection_from_config(config: Any, *, path: str | Path | None = None) -> Any:
+def selection_from_config(
+    config: FractalConfig,
+    *,
+    path: str | Path | None = None,
+) -> ProviderSelection:
     from .config import resolve_effective_config
-    from .providers import ProviderSelection
 
     effective = resolve_effective_config(config, path=path)
     provider_config = effective.provider_config

@@ -6,8 +6,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Literal, Protocol
+from typing import Literal, Protocol
 from urllib.parse import urlparse
+
+from .lm_types import RuntimeLM
 
 
 OPENAI_CODEX = "openai-codex"
@@ -71,7 +73,7 @@ class ProviderBehavior(Protocol):
         definition: "ProviderDefinition",
         *,
         env: Mapping[str, str] | None,
-    ) -> Any: ...
+    ) -> RuntimeLM: ...
 
 
 @dataclass(frozen=True)
@@ -102,7 +104,7 @@ class ProviderDefinition:
         selection: ProviderSelection,
         *,
         env: Mapping[str, str] | None = None,
-    ) -> Any:
+    ) -> RuntimeLM:
         return self.behavior.build_lm(selection, self, env=env)
 
 
@@ -146,7 +148,7 @@ class CodexCliLMBehavior:
         definition: ProviderDefinition,
         *,
         env: Mapping[str, str] | None,
-    ) -> Any:
+    ) -> RuntimeLM:
         codex_model = _resolve_codex_model(selection, definition)
         auth_path = _codex_cli_auth_path(selection)
         try:
@@ -175,7 +177,7 @@ class CustomOpenAICompatibleBehavior:
         definition: ProviderDefinition,
         *,
         env: Mapping[str, str] | None,
-    ) -> Any:
+    ) -> RuntimeLM:
         base_url = _validate_custom_openai_selection(selection, definition, env=env)
         api_key = (os.environ if env is None else env)[selection.api_key_env or ""]
 
@@ -281,11 +283,11 @@ def get_provider(provider_id: str) -> ProviderDefinition:
 
 
 def resolve_lm(
-    explicit_lm: Any | None,
+    explicit_lm: RuntimeLM | None,
     selection: ProviderSelection | None,
     *,
     env: Mapping[str, str] | None = None,
-) -> Any:
+) -> RuntimeLM | None:
     if explicit_lm is not None:
         return explicit_lm
     if selection is None:
@@ -297,7 +299,7 @@ def build_lm(
     selection: ProviderSelection,
     *,
     env: Mapping[str, str] | None = None,
-) -> Any:
+) -> RuntimeLM:
     return get_provider(selection.provider).build_lm(selection, env=env)
 
 

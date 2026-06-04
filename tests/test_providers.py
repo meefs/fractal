@@ -87,7 +87,7 @@ def test_unknown_provider_raises_clear_error() -> None:
 def test_resolve_lm_prefers_explicit_lm() -> None:
     from fractal.providers import OPENAI_API, ProviderSelection, resolve_lm
 
-    explicit = object()
+    explicit = "explicit-lm"
 
     assert resolve_lm(explicit, ProviderSelection(OPENAI_API, model="gpt-5.5")) is explicit
 
