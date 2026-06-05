@@ -29,6 +29,8 @@ def test_cli_parser_defaults_to_cwd() -> None:
     assert args.workspace == Path.cwd()
     assert args.include == []
     assert args.max_iterations == 30
+    assert args.lm is None
+    assert args.sub_lm is None
     assert args.quiet is False
     assert args.verbose is False
     assert args.resume is None
@@ -154,7 +156,7 @@ def test_run_non_interactive_prints_response_and_status(
 
     monkeypatch.setattr(FractalRuntime, "create", fake_create)
     args = cli.build_parser().parse_args(
-        ["--workspace", str(tmp_path), "-p", "update docs"]
+        ["--workspace", str(tmp_path), "--lm", "test-lm", "-p", "update docs"]
     )
     stdout = StringIO()
     stderr = StringIO()
@@ -319,6 +321,7 @@ def test_run_non_interactive_reads_dash_prompt_from_stdin(
         lambda **kwargs: FakeRuntime(),
     )
     args = cli.build_parser().parse_args(["--workspace", str(tmp_path), "-p", "-"])
+    args.lm = "test-lm"
 
     exit_code = cli.run_non_interactive(
         args,
@@ -360,7 +363,9 @@ def test_run_non_interactive_returns_distinct_code_for_max_iterations(
         "create",
         lambda **kwargs: FakeRuntime(),
     )
-    args = cli.build_parser().parse_args(["--workspace", str(tmp_path), "-p", "finish"])
+    args = cli.build_parser().parse_args(
+        ["--workspace", str(tmp_path), "--lm", "test-lm", "-p", "finish"]
+    )
     stdout = StringIO()
     stderr = StringIO()
 
@@ -436,7 +441,7 @@ def test_run_tui_shows_shutdown_status_and_closes_runtime(
         SimpleNamespace(
             workspace=tmp_path,
             include=[],
-            lm=None,
+            lm="test-lm",
             sub_lm=None,
             max_iterations=1,
             debug=False,
@@ -522,7 +527,7 @@ def test_run_tui_allows_force_exit_during_shutdown(
         SimpleNamespace(
             workspace=tmp_path,
             include=[],
-            lm=None,
+            lm="test-lm",
             sub_lm=None,
             max_iterations=1,
             debug=False,

@@ -2,21 +2,30 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from dataclasses import dataclass
 from pathlib import Path
 import sys
-from typing import TextIO
+from typing import Any, TextIO
 
 
 MAX_STDIN_BYTES = 10 * 1024 * 1024
 MAX_ITERATIONS_EXIT_CODE = 2
 
 
+@dataclass(frozen=True)
+class RuntimeLMConfig:
+    lm: Any
+    sub_lm: Any
+
+
+class SetupInputError(ValueError):
+    """Raised when interactive setup cannot collect a required answer."""
+
+
 def include_path(value: str) -> Path:
     path = Path(value)
     if path.is_symlink():
-        raise argparse.ArgumentTypeError(
-            f"included path cannot be a symlink: {value}"
-        )
+        raise argparse.ArgumentTypeError(f"included path cannot be a symlink: {value}")
     resolved = path.resolve()
     if not resolved.exists():
         raise argparse.ArgumentTypeError(f"included path does not exist: {value}")
@@ -33,9 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path.cwd(),
         help="workspace directory to edit; defaults to the current directory",
     )
-    parser.add_argument(
-        "--lm", default="openai/gpt-5.5", help="DSPy LM model string for PredictRLM"
-    )
+    parser.add_argument("--lm", help="override the configured main DSPy LM")
     parser.add_argument(
         "--include",
         action="append",
@@ -46,9 +53,7 @@ def build_parser() -> argparse.ArgumentParser:
             "may be passed multiple times"
         ),
     )
-    parser.add_argument(
-        "--sub-lm", default="openai/gpt-5.1", help="DSPy sub-LM model string"
-    )
+    parser.add_argument("--sub-lm", help="override the configured DSPy sub-LM")
     parser.add_argument("--max-iterations", type=int, default=30)
     parser.add_argument(
         "--resume",
@@ -74,23 +79,55 @@ def build_parser() -> argparse.ArgumentParser:
             "to read the full prompt from stdin"
         ),
     )
+
+    subparsers = parser.add_subparsers(dest="command")
+    config_parser = subparsers.add_parser(
+        "config",
+        help="inspect or repair global Fractal provider/model configuration",
+    )
+    config_subparsers = config_parser.add_subparsers(
+        dest="config_command",
+        required=True,
+    )
+    config_subparsers.add_parser(
+        "show",
+        help="show effective global config with credential references redacted",
+    )
+    config_subparsers.add_parser(
+        "status",
+        help="validate configured provider, model, and auth availability",
+    )
+    config_subparsers.add_parser(
+        "setup",
+        help="run interactive global provider/model/auth setup",
+    )
     return parser
 
 
 def run_tui(args: argparse.Namespace) -> int:
     from rich.console import Console
 
+    console = Console()
+    lm_config = resolve_runtime_lms(
+        args,
+        stdin=sys.stdin,
+        stdout=sys.stdout,
+        stderr=sys.stderr,
+        auto_setup=_stdin_is_tty(sys.stdin),
+    )
+    if lm_config is None:
+        return 1
+
     from .runtime import FractalRuntime
     from .tui import TerminalFractalApp
 
-    console = Console()
     workspace = args.workspace.resolve()
     display_verbose = bool(getattr(args, "verbose", False))
     runtime = FractalRuntime.create(
         workspace_path=workspace,
         included_paths=args.include,
-        lm=args.lm,
-        sub_lm=args.sub_lm,
+        lm=lm_config.lm,
+        sub_lm=lm_config.sub_lm,
         max_iterations=args.max_iterations,
         verbose=False,
         debug=args.debug,
@@ -132,7 +169,6 @@ def run_non_interactive(
 ) -> int:
     from rich.console import Console
 
-    from .events import FractalRuntimeEvent
     from .runtime import FractalRuntime
     from .tui.app import render_iteration_event_log, render_trace_summary
 
@@ -148,12 +184,22 @@ def run_non_interactive(
         print(f"fractal: {exc}", file=stderr)
         return 1
 
+    lm_config = resolve_runtime_lms(
+        args,
+        stdin=stdin,
+        stdout=stdout,
+        stderr=stderr,
+        auto_setup=_stdin_is_tty(stdin),
+    )
+    if lm_config is None:
+        return 1
+
     workspace = args.workspace.resolve()
     try:
         runtime = FractalRuntime.create(
             workspace_path=workspace,
-            lm=args.lm,
-            sub_lm=args.sub_lm,
+            lm=lm_config.lm,
+            sub_lm=lm_config.sub_lm,
             max_iterations=args.max_iterations,
             verbose=False,
             debug=args.debug,
@@ -168,7 +214,7 @@ def run_non_interactive(
         print(f"fractal: session {runtime.session_id}", file=stderr)
         print("fractal: running RLM...", file=stderr)
 
-    def print_runtime_event(event: FractalRuntimeEvent) -> None:
+    def print_runtime_event(event: Any) -> None:
         if not args.quiet:
             print(f"fractal: {event.message}", file=stderr)
 
@@ -216,8 +262,7 @@ def run_non_interactive(
 
     if result.changed_files and not args.quiet:
         print(
-            "fractal: changed files "
-            + ", ".join(result.changed_files),
+            "fractal: changed files " + ", ".join(result.changed_files),
             file=stderr,
         )
 
@@ -228,6 +273,155 @@ def run_non_interactive(
     if not args.quiet:
         print("fractal: complete", file=stderr)
     return 0
+
+
+def run_config_command(
+    args: argparse.Namespace,
+    *,
+    stdin: TextIO | None = None,
+    stdout: TextIO | None = None,
+    stderr: TextIO | None = None,
+) -> int:
+    stdin = stdin or sys.stdin
+    stdout = stdout or sys.stdout
+    stderr = stderr or sys.stderr
+
+    if args.config_command == "show":
+        return config_show(stdout=stdout, stderr=stderr)
+    if args.config_command == "status":
+        return config_status(stdout=stdout, stderr=stderr)
+    if args.config_command == "setup":
+        return config_setup(stdin=stdin, stdout=stdout, stderr=stderr)
+    print(f"fractal config: unknown command {args.config_command!r}", file=stderr)
+    return 1
+
+
+def config_show(*, stdout: TextIO, stderr: TextIO) -> int:
+    from .config import FractalConfigError, load_config, render_config
+
+    try:
+        result = load_config()
+    except FractalConfigError as exc:
+        print(f"fractal config: {exc}", file=stderr)
+        return 1
+    if result.config is None:
+        print(f"fractal config: no config found at {result.path}", file=stderr)
+        print("Run `fractal config setup`.", file=stderr)
+        return 1
+    print(render_config(result.config, path=result.path), file=stdout)
+    return 0
+
+
+def config_status(*, stdout: TextIO, stderr: TextIO) -> int:
+    from .config import FractalConfigError, load_config, render_config
+    from .providers import ProviderError, validate_provider_selection
+
+    try:
+        result = load_config()
+    except FractalConfigError as exc:
+        print("Fractal config status: invalid", file=stdout)
+        print(f"fractal config: {exc}", file=stderr)
+        print("Run `fractal config setup` after fixing the config.", file=stderr)
+        return 1
+    if result.config is None:
+        print("Fractal config status: not configured", file=stdout)
+        print(f"path: {result.path}", file=stdout)
+        print("Run `fractal config setup`.", file=stdout)
+        return 1
+
+    selection = _selection_from_config(result.config, path=result.path)
+    try:
+        validate_provider_selection(selection)
+    except ProviderError as exc:
+        print("Fractal config status: invalid", file=stdout)
+        print(render_config(result.config, path=result.path), file=stdout)
+        print(f"auth/provider check failed: {exc}", file=stderr)
+        print(
+            "Run `fractal config setup` or fix the configured auth source.",
+            file=stderr,
+        )
+        return 1
+
+    print("Fractal config status: ok", file=stdout)
+    print(render_config(result.config, path=result.path), file=stdout)
+    return 0
+
+
+def config_setup(*, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
+    from .config import FractalConfigError, write_config
+    from .providers import ProviderError, validate_provider_selection
+
+    try:
+        config = _prompt_for_config(stdin=stdin, stdout=stdout)
+        selection = _selection_from_config(config)
+        validate_provider_selection(selection)
+        path = write_config(config)
+    except (FractalConfigError, ProviderError, SetupInputError, ValueError) as exc:
+        print(f"fractal config setup: {exc}", file=stderr)
+        print(
+            "No config was written. Fix the issue, then run "
+            "`fractal config setup` again.",
+            file=stderr,
+        )
+        return 1
+
+    print(f"Fractal config written to {path}", file=stdout)
+    return 0
+
+
+def resolve_runtime_lms(
+    args: argparse.Namespace,
+    *,
+    stdin: TextIO,
+    stdout: TextIO,
+    stderr: TextIO,
+    auto_setup: bool,
+) -> RuntimeLMConfig | None:
+    from .config import FractalConfigError, load_config
+    from .providers import ProviderError, build_lm
+
+    if args.lm is not None:
+        return RuntimeLMConfig(lm=args.lm, sub_lm=args.sub_lm)
+
+    try:
+        result = load_config()
+    except FractalConfigError as exc:
+        print(f"fractal config: {exc}", file=stderr)
+        print("Run `fractal config setup` after fixing the config.", file=stderr)
+        return None
+
+    if result.config is None:
+        if not auto_setup:
+            print(f"fractal: no global config found at {result.path}", file=stderr)
+            print("Run `fractal config setup` or pass `--lm` explicitly.", file=stderr)
+            return None
+        print("fractal: no global config found; starting setup.", file=stderr)
+        if config_setup(stdin=stdin, stdout=stdout, stderr=stderr) != 0:
+            return None
+        try:
+            result = load_config()
+        except FractalConfigError as exc:
+            print(f"fractal config: {exc}", file=stderr)
+            return None
+        if result.config is None:
+            print(
+                "fractal: setup completed but config could not be loaded", file=stderr
+            )
+            return None
+
+    selection = _selection_from_config(result.config, path=result.path)
+    try:
+        lm = build_lm(selection)
+    except ProviderError as exc:
+        print(f"fractal config: {exc}", file=stderr)
+        print(
+            "Run `fractal config status` for details or "
+            "`fractal config setup` to repair setup.",
+            file=stderr,
+        )
+        return None
+    sub_lm = args.sub_lm if args.sub_lm is not None else lm
+    return RuntimeLMConfig(lm=lm, sub_lm=sub_lm)
 
 
 def read_non_interactive_stdin(prompt: str, stdin: TextIO) -> str | None:
@@ -249,10 +443,7 @@ def build_non_interactive_message(prompt: str, stdin_text: str | None) -> str:
     if stdin_text is None:
         return prompt
     return (
-        f"{prompt}\n\n"
-        "<Fractal stdin context>\n"
-        f"{stdin_text}"
-        "\n</Fractal stdin context>"
+        f"{prompt}\n\n<Fractal stdin context>\n{stdin_text}\n</Fractal stdin context>"
     )
 
 
@@ -279,9 +470,165 @@ def _stdin_is_tty(stdin: TextIO) -> bool:
         return False
 
 
+def _prompt_for_config(*, stdin: TextIO, stdout: TextIO) -> Any:
+    from .config import FractalConfig
+    from .providers import list_providers
+
+    providers = list_providers()
+    print("Fractal global config setup", file=stdout)
+    print("Choose a provider:", file=stdout)
+    for index, provider in enumerate(providers, start=1):
+        examples = ", ".join(provider.model_examples)
+        print(
+            f"{index}. {provider.display_name} ({provider.id})",
+            file=stdout,
+        )
+        print(f"   default model: {provider.default_model}", file=stdout)
+        if examples:
+            print(f"   model examples: {examples}", file=stdout)
+
+    provider = _prompt_provider(stdin=stdin, stdout=stdout, providers=providers)
+    model = _prompt(
+        stdin=stdin,
+        stdout=stdout,
+        label=f"Model for {provider.display_name}",
+        default=provider.default_model,
+    )
+    provider_config = _prompt_provider_settings(
+        stdin=stdin,
+        stdout=stdout,
+        provider_id=provider.id,
+    )
+    return FractalConfig(
+        active_provider=provider.id,
+        active_model=model,
+        providers={provider.id: provider_config},
+    )
+
+
+def _prompt_provider(*, stdin: TextIO, stdout: TextIO, providers: list[Any]) -> Any:
+    from .providers import get_provider
+
+    provider_by_index = {
+        str(index): provider for index, provider in enumerate(providers, start=1)
+    }
+    provider_ids = {provider.id for provider in providers}
+    while True:
+        answer = _prompt(
+            stdin=stdin,
+            stdout=stdout,
+            label="Provider number or id",
+            default=providers[0].id,
+        )
+        if answer in provider_by_index:
+            return provider_by_index[answer]
+        if answer in provider_ids:
+            return get_provider(answer)
+        print(
+            f"Unknown provider {answer!r}. Choose one of the listed providers.",
+            file=stdout,
+        )
+
+
+def _prompt_provider_settings(
+    *,
+    stdin: TextIO,
+    stdout: TextIO,
+    provider_id: str,
+) -> Any:
+    from .config import ProviderConfig
+    from .providers import (
+        CUSTOM_OPENAI_COMPATIBLE,
+        OPENAI_CODEX,
+        get_provider,
+    )
+
+    provider = get_provider(provider_id)
+    if provider.id == OPENAI_CODEX:
+        print("OpenAI Codex uses the official Codex CLI auth store.", file=stdout)
+        print(
+            "If needed, run `codex login --device-auth` before continuing.",
+            file=stdout,
+        )
+        return ProviderConfig(auth_source="codex-cli")
+
+    if provider.id == CUSTOM_OPENAI_COMPATIBLE:
+        base_url = _prompt_required(
+            stdin=stdin,
+            stdout=stdout,
+            label="OpenAI-compatible base URL",
+        )
+        api_key_env = _prompt(
+            stdin=stdin,
+            stdout=stdout,
+            label="API key environment variable",
+            default="CUSTOM_OPENAI_API_KEY",
+        )
+        return ProviderConfig(
+            auth_source="env",
+            api_key_env=api_key_env,
+            base_url=base_url,
+        )
+
+    if provider.auth_type == "api_key_env":
+        api_key_env = _prompt(
+            stdin=stdin,
+            stdout=stdout,
+            label="API key environment variable",
+            default=provider.default_api_key_env,
+        )
+        return ProviderConfig(auth_source="env", api_key_env=api_key_env)
+
+    raise SetupInputError(f"provider {provider.id!r} is not supported by setup")
+
+
+def _prompt(
+    *,
+    stdin: TextIO,
+    stdout: TextIO,
+    label: str,
+    default: str | None = None,
+) -> str:
+    suffix = f" [{default}]" if default else ""
+    print(f"{label}{suffix}: ", end="", flush=True, file=stdout)
+    answer = stdin.readline()
+    if answer == "":
+        raise SetupInputError("setup requires interactive input")
+    value = answer.strip()
+    if value:
+        return value
+    if default:
+        return default
+    return ""
+
+
+def _prompt_required(*, stdin: TextIO, stdout: TextIO, label: str) -> str:
+    value = _prompt(stdin=stdin, stdout=stdout, label=label)
+    if not value:
+        raise SetupInputError(f"{label} is required")
+    return value
+
+
+def _selection_from_config(config: Any, *, path: str | Path | None = None) -> Any:
+    from .config import resolve_effective_config
+    from .providers import ProviderSelection
+
+    effective = resolve_effective_config(config, path=path)
+    provider_config = effective.provider_config
+    return ProviderSelection(
+        provider=effective.provider,
+        model=effective.model,
+        api_key_env=provider_config.api_key_env,
+        base_url=provider_config.base_url,
+        auth_source=provider_config.auth_source,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command == "config":
+        return run_config_command(args)
     if args.prompt is not None:
         return run_non_interactive(args)
     return run_tui(args)
