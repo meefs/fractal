@@ -141,6 +141,143 @@ def test_config_setup_api_provider_writes_non_secret_toml(
     assert stderr.getvalue() == ""
 
 
+def test_line_setup_accepts_numbered_provider_and_model_choices() -> None:
+    from fractal.onboarding import prompt_for_config
+
+    config = prompt_for_config(
+        stdin=StringIO("2\n2\n\n"),
+        stdout=StringIO(),
+    )
+
+    assert config.active_provider == "openai-api"
+    assert config.active_model == "gpt-5.4"
+    assert config.providers["openai-api"].api_key_env == "OPENAI_API_KEY"
+
+
+def test_inline_menu_space_selects_and_enter_confirms() -> None:
+    from fractal.onboarding import InlineMenuState, MenuChoice
+
+    state = InlineMenuState.create(
+        choices=[
+            MenuChoice(value="first", label="First"),
+            MenuChoice(value="second", label="Second"),
+        ],
+        default="first",
+    )
+
+    state.move_down()
+    assert state.confirmed_value() == "first"
+
+    state.select_active()
+
+    assert state.confirmed_value() == "second"
+
+
+def test_inline_menu_key_bindings_include_space_and_enter() -> None:
+    from fractal.onboarding import (
+        InlineMenuState,
+        MenuChoice,
+        _inline_menu_key_bindings,
+    )
+
+    state = InlineMenuState.create(
+        choices=[MenuChoice(value="first", label="First")],
+        default="first",
+    )
+    bindings = _inline_menu_key_bindings(state)
+
+    key_names = {tuple(str(key) for key in binding.keys) for binding in bindings.bindings}
+    assert (" ",) in key_names
+    assert ("Keys.ControlM",) in key_names
+
+
+def test_inline_setup_uses_provider_and_model_menus(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fractal import onboarding
+
+    calls: list[dict[str, object]] = []
+
+    def fake_choose_from_menu(**kwargs: object) -> str:
+        calls.append(kwargs)
+        if kwargs["title"] == "Fractal setup":
+            return "openai-api"
+        return "gpt-5.4-mini"
+
+    monkeypatch.setattr(
+        onboarding,
+        "_should_use_inline_menu",
+        lambda **kwargs: True,
+    )
+    monkeypatch.setattr(onboarding, "_choose_from_menu", fake_choose_from_menu)
+    monkeypatch.setattr(
+        onboarding,
+        "_prompt_text_interactive",
+        lambda **kwargs: kwargs.get("default", ""),
+    )
+
+    config = onboarding.prompt_for_config(stdin=StringIO(), stdout=StringIO())
+
+    assert config.active_provider == "openai-api"
+    assert config.active_model == "gpt-5.4-mini"
+    assert [call["title"] for call in calls] == [
+        "Fractal setup",
+        "OpenAI API model",
+    ]
+    provider_values = [choice.value for choice in calls[0]["choices"]]
+    model_values = [choice.value for choice in calls[1]["choices"]]
+    assert "openai-api" in provider_values
+    assert model_values == [
+        "gpt-5.5",
+        "gpt-5.4",
+        "gpt-5.4-mini",
+        "gpt-5.4-nano",
+    ]
+
+
+def test_inline_setup_allows_custom_openai_model_entry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fractal import onboarding
+
+    model_choices: list[str] = []
+
+    def fake_choose_from_menu(**kwargs: object) -> str:
+        if kwargs["title"] == "Fractal setup":
+            return "custom-openai-compatible"
+        model_choices.extend(choice.value for choice in kwargs["choices"])
+        return onboarding.CUSTOM_MODEL_SENTINEL
+
+    def fake_prompt_text_interactive(**kwargs: object) -> str:
+        if kwargs["label"] == "Model id":
+            return "endpoint-specific-model"
+        if kwargs["label"] == "OpenAI-compatible base URL":
+            return "https://llm.example.test/v1"
+        return "CUSTOM_KEY"
+
+    monkeypatch.setattr(
+        onboarding,
+        "_should_use_inline_menu",
+        lambda **kwargs: True,
+    )
+    monkeypatch.setattr(onboarding, "_choose_from_menu", fake_choose_from_menu)
+    monkeypatch.setattr(
+        onboarding,
+        "_prompt_text_interactive",
+        fake_prompt_text_interactive,
+    )
+
+    config = onboarding.prompt_for_config(stdin=StringIO(), stdout=StringIO())
+
+    assert onboarding.CUSTOM_MODEL_SENTINEL in model_choices
+    assert config.active_provider == "custom-openai-compatible"
+    assert config.active_model == "endpoint-specific-model"
+    assert (
+        config.providers["custom-openai-compatible"].base_url
+        == "https://llm.example.test/v1"
+    )
+
+
 def test_config_setup_custom_invalid_url_does_not_write_config(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -189,6 +326,7 @@ def test_config_setup_codex_provider_writes_codex_cli_source(
         (tmp_path / "fractal" / "config.toml").read_text(encoding="utf-8")
     )
     assert data["active_provider"] == "openai-codex"
+    assert data["active_model"] == "gpt-5.5"
     assert data["providers"]["openai-codex"] == {"auth_source": "codex-cli"}
 
 
@@ -229,14 +367,14 @@ def test_resolve_runtime_lms_auto_setup_on_missing_config(
 
     lm_config = cli.resolve_runtime_lms(
         args,
-        stdin=StringIO("anthropic\nclaude-sonnet-4-5\n\n"),
+        stdin=StringIO("anthropic\nclaude-sonnet-4-6\n\n"),
         stdout=StringIO(),
         stderr=stderr,
         auto_setup=True,
     )
 
     assert lm_config is not None
-    assert lm_config.lm == "anthropic/claude-sonnet-4-5"
+    assert lm_config.lm == "anthropic/claude-sonnet-4-6"
     assert "starting setup" in stderr.getvalue()
     assert (tmp_path / "fractal" / "config.toml").exists()
 

@@ -60,6 +60,7 @@ def test_registry_contains_initial_provider_set() -> None:
         OPENAI_CODEX,
         OPENROUTER,
         get_provider,
+        model_choices,
         provider_registry,
     )
 
@@ -71,6 +72,35 @@ def test_registry_contains_initial_provider_set() -> None:
         CUSTOM_OPENAI_COMPATIBLE,
     }
     assert get_provider(OPENAI_CODEX).auth_type == "codex_cli"
+    assert get_provider(OPENAI_CODEX).default_model == "gpt-5.5"
+    assert model_choices(get_provider(OPENAI_CODEX)) == ("gpt-5.5",)
+    assert model_choices(get_provider(OPENAI_API)) == (
+        "gpt-5.5",
+        "gpt-5.4",
+        "gpt-5.4-mini",
+        "gpt-5.4-nano",
+    )
+    assert model_choices(get_provider(ANTHROPIC)) == (
+        "claude-sonnet-4-6",
+        "claude-opus-4-8",
+        "claude-haiku-4-5",
+    )
+    assert model_choices(get_provider(OPENROUTER)) == (
+        "openai/gpt-5.5",
+        "openai/gpt-5.4",
+        "openai/gpt-5.4-mini",
+        "anthropic/claude-opus-4.8",
+        "anthropic/claude-sonnet-4.6",
+        "anthropic/claude-haiku-4.5",
+        "deepseek/deepseek-v4-pro",
+        "qwen/qwen3-coder",
+        "openrouter/pareto-code",
+        "openai/gpt-oss-120b",
+    )
+    assert model_choices(get_provider(CUSTOM_OPENAI_COMPATIBLE)) == (
+        "gpt-oss-120b",
+        "qwen3-coder",
+    )
     assert get_provider(OPENAI_API).default_api_key_env == "OPENAI_API_KEY"
     assert get_provider(ANTHROPIC).default_api_key_env == "ANTHROPIC_API_KEY"
     assert get_provider(OPENROUTER).default_api_key_env == "OPENROUTER_API_KEY"
@@ -97,7 +127,7 @@ def test_resolve_lm_prefers_explicit_lm() -> None:
     [
         ("openai-api", "gpt-5.5", "openai/gpt-5.5"),
         ("openai-api", "openai/gpt-5.5", "openai/gpt-5.5"),
-        ("anthropic", "claude-sonnet-4-5", "anthropic/claude-sonnet-4-5"),
+        ("anthropic", "claude-sonnet-4-6", "anthropic/claude-sonnet-4-6"),
         (
             "openrouter",
             "openai/gpt-5.5",
@@ -193,11 +223,11 @@ def test_codex_factory_uses_codex_model_resolver(
     auth_path = object()
     calls = install_fake_codex_modules(monkeypatch, auth_path=auth_path)
 
-    lm = build_lm(ProviderSelection(OPENAI_CODEX, model="openai/gpt-5.3-codex"))
+    lm = build_lm(ProviderSelection(OPENAI_CODEX, model="openai/gpt-5.5"))
 
     assert type(lm).__name__ == "FakeCodexLM"
     assert calls == {
-        "requested": "openai/gpt-5.3-codex",
+        "requested": "openai/gpt-5.5",
         "load_auth_path": auth_path,
         "model": "resolved-codex-model",
         "auth_path": auth_path,
@@ -216,9 +246,10 @@ def test_codex_factory_reports_unsupported_model(
 
     calls = install_fake_codex_modules(monkeypatch)
 
-    with pytest.raises(UnsupportedProviderModelError, match="cannot route 'gpt-4o'"):
+    with pytest.raises(UnsupportedProviderModelError, match="only supports"):
         build_lm(ProviderSelection(OPENAI_CODEX, model="gpt-4o"))
 
+    assert "requested" not in calls
     assert "load_auth_path" not in calls
 
 

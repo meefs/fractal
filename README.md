@@ -11,13 +11,15 @@ Configuration
 
 Fractal uses a global TOML config for non-secret provider and model settings.
 On first interactive run, if no global config exists, Fractal starts setup
-automatically:
+automatically. Setup uses inline keyboard menus for provider and model
+selection:
 
 ```bash
 uv run fractal
 ```
 
-You can also run setup directly:
+You can also run setup directly. Use Up/Down to move through highlighted
+choices, Space to select, and Enter to confirm:
 
 ```bash
 uv run fractal config setup
@@ -43,7 +45,17 @@ Supported MVP providers:
 
 `openai-codex` requires the official `codex` CLI and an existing Codex login.
 Fractal reads Codex CLI auth through PredictRLM's `dspy_codex_lm.CodexLM`
-adapter and does not copy Codex OAuth tokens into Fractal config.
+adapter and does not copy Codex OAuth tokens into Fractal config. Fractal only
+offers the Codex `gpt-5.5` family during setup right now.
+
+Setup model menus are curated starting points, not exhaustive provider
+catalogs. OpenAI API setup offers the current GPT-5.5/GPT-5.4 text-output
+models that fit Fractal's coding-agent path. Anthropic setup offers Claude
+Sonnet 4.6, Opus 4.8, and Haiku 4.5. OpenRouter setup offers a small current
+coding-focused subset from its live catalog, while explicit config can still
+use another valid OpenRouter model id. Custom OpenAI-compatible endpoints keep
+a custom model entry because Fractal cannot know an endpoint-local catalog
+before the endpoint is configured.
 
 For one-off runs or tests, `--lm` bypasses global config resolution:
 

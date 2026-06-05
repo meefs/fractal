@@ -90,12 +90,13 @@ class ProviderDefinition:
     auth_source: ProviderAuthSource
     default_model: str
     behavior: ProviderBehavior
-    model_examples: tuple[str, ...] = ()
+    model_options: tuple[str, ...] = ()
     default_api_key_env: str | None = None
     model_prefix: str | None = None
     supports_base_url: bool = False
     base_url_label: str | None = None
     setup_messages: tuple[str, ...] = ()
+    restricted_models: tuple[str, ...] = ()
 
     def validate_shape(
         self,
@@ -295,17 +296,13 @@ _PROVIDERS: dict[str, ProviderDefinition] = {
         display_name="OpenAI Codex",
         auth_type="codex_cli",
         auth_source="codex-cli",
-        default_model="gpt-5.3-codex",
+        default_model="gpt-5.5",
         behavior=_CODEX_CLI_LM,
-        model_examples=(
-            "gpt-5.3-codex",
-            "gpt-5.4-mini",
-            "gpt-5.5",
-        ),
         setup_messages=(
             "OpenAI Codex uses the official Codex CLI auth store.",
             "If needed, run `codex login --device-auth` before continuing.",
         ),
+        restricted_models=("gpt-5.5",),
     ),
     OPENAI_API: ProviderDefinition(
         id=OPENAI_API,
@@ -314,7 +311,7 @@ _PROVIDERS: dict[str, ProviderDefinition] = {
         auth_source="env",
         default_model="gpt-5.5",
         behavior=_API_KEY_STRING_LM,
-        model_examples=("gpt-5.5", "gpt-5.4-mini"),
+        model_options=("gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"),
         default_api_key_env="OPENAI_API_KEY",
         model_prefix="openai",
     ),
@@ -323,9 +320,9 @@ _PROVIDERS: dict[str, ProviderDefinition] = {
         display_name="Anthropic",
         auth_type="api_key_env",
         auth_source="env",
-        default_model="claude-sonnet-4-5",
+        default_model="claude-sonnet-4-6",
         behavior=_API_KEY_STRING_LM,
-        model_examples=("claude-sonnet-4-5", "claude-haiku-4-5"),
+        model_options=("claude-opus-4-8", "claude-haiku-4-5"),
         default_api_key_env="ANTHROPIC_API_KEY",
         model_prefix="anthropic",
     ),
@@ -336,7 +333,17 @@ _PROVIDERS: dict[str, ProviderDefinition] = {
         auth_source="env",
         default_model="openai/gpt-5.5",
         behavior=_API_KEY_STRING_LM,
-        model_examples=("openai/gpt-5.5", "anthropic/claude-sonnet-4-5"),
+        model_options=(
+            "openai/gpt-5.4",
+            "openai/gpt-5.4-mini",
+            "anthropic/claude-opus-4.8",
+            "anthropic/claude-sonnet-4.6",
+            "anthropic/claude-haiku-4.5",
+            "deepseek/deepseek-v4-pro",
+            "qwen/qwen3-coder",
+            "openrouter/pareto-code",
+            "openai/gpt-oss-120b",
+        ),
         default_api_key_env="OPENROUTER_API_KEY",
         model_prefix="openrouter",
     ),
@@ -345,9 +352,9 @@ _PROVIDERS: dict[str, ProviderDefinition] = {
         display_name="Custom OpenAI-compatible",
         auth_type="api_key_env",
         auth_source="env",
-        default_model="model-name",
+        default_model="gpt-oss-120b",
         behavior=_CUSTOM_OPENAI_COMPATIBLE_LM,
-        model_examples=("gpt-oss-120b", "qwen3-coder"),
+        model_options=("qwen3-coder",),
         default_api_key_env="CUSTOM_OPENAI_API_KEY",
         supports_base_url=True,
         base_url_label="OpenAI-compatible base URL",
@@ -362,6 +369,14 @@ def provider_registry() -> Mapping[str, ProviderDefinition]:
 
 def list_providers() -> list[ProviderDefinition]:
     return list(_PROVIDERS.values())
+
+
+def model_choices(definition: ProviderDefinition) -> tuple[str, ...]:
+    choices: list[str] = []
+    for model in (definition.default_model, *definition.model_options):
+        if model and model not in choices:
+            choices.append(model)
+    return tuple(choices)
 
 
 def get_provider(provider_id: str) -> ProviderDefinition:
@@ -413,6 +428,13 @@ def _selection_model(
     model = selection.model or definition.default_model
     if not model:
         raise ProviderConfigError(f"provider {definition.id!r} requires a model")
+    if definition.restricted_models:
+        slug = _strip_provider_prefix(model)
+        if slug not in definition.restricted_models:
+            supported = ", ".join(definition.restricted_models)
+            raise UnsupportedProviderModelError(
+                f"provider {definition.id!r} only supports these models: {supported}"
+            )
     return model
 
 
@@ -432,6 +454,10 @@ def _normalize_model(model: str, definition: ProviderDefinition) -> str:
     if prefix is None or model.startswith(f"{prefix}/"):
         return model
     return f"{prefix}/{model}"
+
+
+def _strip_provider_prefix(model: str) -> str:
+    return model.split("/", 1)[1] if "/" in model else model
 
 
 def _api_key_env_name(
