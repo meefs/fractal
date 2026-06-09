@@ -93,19 +93,23 @@ def test_registry_contains_initial_provider_set() -> None:
         "gpt-5.4-nano",
     )
     assert model_choices(get_provider(ANTHROPIC)) == (
-        "claude-sonnet-4-6",
+        "claude-fable-5",
         "claude-opus-4-8",
+        "claude-sonnet-4-6",
         "claude-haiku-4-5",
     )
     assert model_choices(get_provider(OPENROUTER)) == (
         "openai/gpt-5.5",
         "openai/gpt-5.4",
         "openai/gpt-5.4-mini",
+        "anthropic/claude-fable-5",
         "anthropic/claude-opus-4.8",
         "anthropic/claude-sonnet-4.6",
         "anthropic/claude-haiku-4.5",
         "deepseek/deepseek-v4-pro",
+        "deepseek/deepseek-v4-flash",
         "qwen/qwen3-coder",
+        "poolside/laguna-m.1",
         "openrouter/pareto-code",
         "openai/gpt-oss-120b",
     )
@@ -147,11 +151,11 @@ def test_resolve_lm_prefers_explicit_lm() -> None:
         ("openai-api", "gpt-5.5", "openai/gpt-5.5"),
         ("openai-api", "openai/gpt-5.5", "openai/gpt-5.5"),
         ("anthropic", "claude-sonnet-4-6", "anthropic/claude-sonnet-4-6"),
-        ("gemini", "gemini-3-pro", "gemini/gemini-3-pro"),
-        ("xai", "grok-4", "xai/grok-4"),
-        ("deepseek", "deepseek-chat", "deepseek/deepseek-chat"),
-        ("mistral", "devstral-medium-latest", "mistral/devstral-medium-latest"),
-        ("groq", "moonshotai/kimi-k2-instruct", "groq/moonshotai/kimi-k2-instruct"),
+        ("gemini", "gemini-3.5-flash", "gemini/gemini-3.5-flash"),
+        ("xai", "grok-4.3", "xai/grok-4.3"),
+        ("deepseek", "deepseek-v4-pro", "deepseek/deepseek-v4-pro"),
+        ("mistral", "devstral-2-latest", "mistral/devstral-2-latest"),
+        ("groq", "openai/gpt-oss-120b", "groq/openai/gpt-oss-120b"),
         (
             "openrouter",
             "openai/gpt-5.5",
