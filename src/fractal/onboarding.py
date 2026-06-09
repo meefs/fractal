@@ -296,13 +296,28 @@ def _prompt_provider_line(
         )
 
 
-def _prompt_model_line(*, stdin: TextIO, stdout: TextIO, provider: Any) -> str:
-    from .providers import model_choices
+def _model_choices_with_installed(provider: Any) -> tuple[tuple[str, ...], frozenset[str]]:
+    """Static model suggestions, with locally installed Ollama models first."""
+    from .providers import OLLAMA, model_choices
 
-    choices = model_choices(provider)
+    choices = list(model_choices(provider))
+    installed: frozenset[str] = frozenset()
+    if provider.id == OLLAMA:
+        from .connectivity import list_ollama_models
+
+        names = list_ollama_models()
+        installed = frozenset(names)
+        if names:
+            choices = names + [model for model in choices if model not in installed]
+    return tuple(choices), installed
+
+
+def _prompt_model_line(*, stdin: TextIO, stdout: TextIO, provider: Any) -> str:
+    choices, installed = _model_choices_with_installed(provider)
     print(f"Choose a model for {provider.display_name}:", file=stdout)
     for index, model in enumerate(choices, start=1):
-        print(f"{index}. {model}", file=stdout)
+        note = " (installed)" if model in installed else ""
+        print(f"{index}. {model}{note}", file=stdout)
     if provider.allows_custom_model:
         print("Or enter any model id supported by this provider.", file=stdout)
 
@@ -647,10 +662,15 @@ def _prompt_required(*, stdin: TextIO, stdout: TextIO, label: str) -> str:
 
 
 def _choose_model(*, provider: Any, stdout: TextIO) -> str:
-    from .providers import model_choices
-
-    choices = model_choices(provider)
-    menu_choices = [MenuChoice(value=model, label=model) for model in choices]
+    choices, installed = _model_choices_with_installed(provider)
+    menu_choices = [
+        MenuChoice(
+            value=model,
+            label=model,
+            detail="installed" if model in installed else None,
+        )
+        for model in choices
+    ]
     if provider.allows_custom_model:
         menu_choices.append(
             MenuChoice(
@@ -676,10 +696,15 @@ def _choose_model(*, provider: Any, stdout: TextIO) -> str:
 
 
 async def _choose_model_async(*, provider: Any, stdout: TextIO) -> str:
-    from .providers import model_choices
-
-    choices = model_choices(provider)
-    menu_choices = [MenuChoice(value=model, label=model) for model in choices]
+    choices, installed = _model_choices_with_installed(provider)
+    menu_choices = [
+        MenuChoice(
+            value=model,
+            label=model,
+            detail="installed" if model in installed else None,
+        )
+        for model in choices
+    ]
     if provider.allows_custom_model:
         menu_choices.append(
             MenuChoice(

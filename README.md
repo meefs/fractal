@@ -71,8 +71,10 @@ Setup model menus are curated starting points, not exhaustive provider
 catalogs. Every provider except `openai-codex` also accepts a free-form model
 id (the "Custom model..." entry in menus), so newly released models work
 without a Fractal update. `ollama` talks to a local Ollama server and needs no
-API key; setup asks for the server URL and defaults to
-`http://localhost:11434`.
+API key; setup asks for the server URL (default `http://localhost:11434`) and
+queries `/api/tags` so models you have actually pulled are listed first,
+marked "(installed)", falling back to static suggestions when the server is
+not running.
 
 For API-key providers, setup asks how to provide the key: paste it directly
 (the default), or reference an environment variable. Pasted keys are stored in

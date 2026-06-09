@@ -98,6 +98,42 @@ def _urlopen_status(request: urllib.request.Request, timeout: float) -> int:
         return response.status
 
 
+def list_ollama_models(
+    base_url: str | None = None,
+    *,
+    timeout: float = 2.0,
+    opener: Callable[[urllib.request.Request, float], object] | None = None,
+) -> list[str]:
+    """Return the models pulled into a local Ollama server, or [] if unknown.
+
+    Failures fall back to an empty list so onboarding can degrade to the
+    static suggestion list when the server is not running.
+    """
+    from .providers import DEFAULT_OLLAMA_BASE_URL
+
+    url = (base_url or DEFAULT_OLLAMA_BASE_URL).rstrip("/") + "/api/tags"
+    request = urllib.request.Request(url, method="GET")
+    open_json = opener or _urlopen_json
+    try:
+        payload = open_json(request, timeout)
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+        return []
+    models = payload.get("models", []) if isinstance(payload, dict) else []
+    names: list[str] = []
+    for entry in models:
+        name = entry.get("name") if isinstance(entry, dict) else None
+        if isinstance(name, str) and name:
+            names.append(name.removesuffix(":latest"))
+    return list(dict.fromkeys(names))
+
+
+def _urlopen_json(request: urllib.request.Request, timeout: float) -> object:
+    import json
+
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
 def _endpoint_for(
     selection: ProviderSelection,
     definition: ProviderDefinition,

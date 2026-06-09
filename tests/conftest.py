@@ -26,3 +26,10 @@ def _stub_provider_connectivity(monkeypatch: pytest.MonkeyPatch) -> None:
         "fractal.connectivity._urlopen_status",
         lambda request, timeout: 200,
     )
+
+    def _no_json(request: object, timeout: float) -> object:
+        import urllib.error
+
+        raise urllib.error.URLError("network disabled in tests")
+
+    monkeypatch.setattr("fractal.connectivity._urlopen_json", _no_json)

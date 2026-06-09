@@ -233,3 +233,74 @@ def test_config_setup_verifies_connectivity_on_success(
 
     assert exit_code == 0
     assert "Provider connectivity verified." in stdout.getvalue()
+
+
+def test_list_ollama_models_parses_tags_and_dedupes() -> None:
+    from fractal.connectivity import list_ollama_models
+
+    requests: list[urllib.request.Request] = []
+
+    def opener(request: urllib.request.Request, timeout: float) -> object:
+        requests.append(request)
+        return {
+            "models": [
+                {"name": "qwen3-coder:latest"},
+                {"name": "qwen3-coder"},
+                {"name": "gpt-oss:20b"},
+                {"size": 123},
+            ]
+        }
+
+    models = list_ollama_models(opener=opener)
+
+    assert models == ["qwen3-coder", "gpt-oss:20b"]
+    assert requests[0].full_url == "http://localhost:11434/api/tags"
+
+
+def test_list_ollama_models_falls_back_to_empty_on_failure() -> None:
+    from fractal.connectivity import list_ollama_models
+
+    def opener(request: urllib.request.Request, timeout: float) -> object:
+        raise urllib.error.URLError("connection refused")
+
+    assert list_ollama_models(opener=opener) == []
+
+
+def test_ollama_setup_lists_installed_models_first(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from fractal.onboarding import prompt_for_config
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.setattr(
+        "fractal.connectivity.list_ollama_models",
+        lambda *args, **kwargs: ["smollm2", "qwen3-coder"],
+    )
+    stdout = StringIO()
+
+    config = prompt_for_config(
+        stdin=StringIO("ollama\n1\n\n"),
+        stdout=stdout,
+    )
+
+    assert config.active_provider == "ollama"
+    # Choice 1 is the first installed model, ahead of the static suggestions.
+    assert config.active_model == "smollm2"
+    assert "1. smollm2 (installed)" in stdout.getvalue()
+
+
+def test_ollama_setup_degrades_to_static_models_when_server_down(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from fractal.onboarding import prompt_for_config
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+
+    config = prompt_for_config(
+        stdin=StringIO("ollama\n1\n\n"),
+        stdout=StringIO(),
+    )
+
+    assert config.active_model == "qwen3-coder"
