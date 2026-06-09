@@ -18,12 +18,13 @@ def run_config_command(
     stdout = stdout or sys.stdout
     stderr = stderr or sys.stderr
 
+    offline = bool(getattr(args, "offline", False))
     if args.config_command == "show":
         return config_show(stdout=stdout, stderr=stderr)
     if args.config_command == "status":
-        return config_status(stdout=stdout, stderr=stderr)
+        return config_status(stdout=stdout, stderr=stderr, offline=offline)
     if args.config_command == "setup":
-        return config_setup(stdin=stdin, stdout=stdout, stderr=stderr)
+        return config_setup(stdin=stdin, stdout=stdout, stderr=stderr, offline=offline)
     print(f"fractal config: unknown command {args.config_command!r}", file=stderr)
     return 1
 
@@ -44,8 +45,9 @@ def config_show(*, stdout: TextIO, stderr: TextIO) -> int:
     return 0
 
 
-def config_status(*, stdout: TextIO, stderr: TextIO) -> int:
+def config_status(*, stdout: TextIO, stderr: TextIO, offline: bool = False) -> int:
     from .config import FractalConfigError, load_config, render_config
+    from .connectivity import ProviderConnectivityError, check_provider_connectivity
     from .providers import ProviderError, check_provider_readiness
 
     try:
@@ -74,13 +76,40 @@ def config_status(*, stdout: TextIO, stderr: TextIO) -> int:
         )
         return 1
 
+    connectivity_note = "connectivity: skipped (--offline)"
+    if not offline:
+        try:
+            checked = check_provider_connectivity(selection)
+        except ProviderConnectivityError as exc:
+            print("Fractal config status: unreachable", file=stdout)
+            print(render_config(result.config, path=result.path), file=stdout)
+            print(f"connectivity check failed: {exc}", file=stderr)
+            print(
+                "Fix the credential or network, or re-run with `--offline`.",
+                file=stderr,
+            )
+            return 1
+        connectivity_note = (
+            "connectivity: verified"
+            if checked
+            else "connectivity: not checked for this provider"
+        )
+
     print("Fractal config status: ok", file=stdout)
     print(render_config(result.config, path=result.path), file=stdout)
+    print(connectivity_note, file=stdout)
     return 0
 
 
-def config_setup(*, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
+def config_setup(
+    *,
+    stdin: TextIO,
+    stdout: TextIO,
+    stderr: TextIO,
+    offline: bool = False,
+) -> int:
     from .config import FractalConfigError, write_config
+    from .connectivity import ProviderConnectivityError, check_provider_connectivity
     from .providers import (
         MissingProviderCredentialError,
         ProviderError,
@@ -116,4 +145,19 @@ def config_setup(*, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
             "Provide the credential, then run `fractal config status` to verify.",
             file=stderr,
         )
+        return 0
+
+    # Verify the credential actually works, not just that it exists. Network
+    # problems should not undo a finished setup, so failures only warn.
+    if not offline:
+        try:
+            if check_provider_connectivity(selection):
+                print("Provider connectivity verified.", file=stdout)
+        except ProviderConnectivityError as exc:
+            print(f"warning: {exc}", file=stderr)
+            print(
+                "The config was written. Fix the credential or network, then "
+                "run `fractal config status` to verify.",
+                file=stderr,
+            )
     return 0

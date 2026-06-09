@@ -107,13 +107,23 @@ def build_parser() -> argparse.ArgumentParser:
         "show",
         help="show effective global config with credential references redacted",
     )
-    config_subparsers.add_parser(
+    status_parser = config_subparsers.add_parser(
         "status",
         help="validate configured provider, model, and auth availability",
     )
-    config_subparsers.add_parser(
+    status_parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="skip the live provider connectivity check",
+    )
+    setup_parser = config_subparsers.add_parser(
         "setup",
         help="run interactive global provider/model/auth setup",
+    )
+    setup_parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="skip the live provider connectivity check after setup",
     )
     return parser
 

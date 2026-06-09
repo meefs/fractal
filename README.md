@@ -70,6 +70,12 @@ If setup uses an environment variable that is currently unset, it still writes
 the config (which never contains secrets) and prints the exact variable to
 export; `fractal config status` verifies readiness afterwards.
 
+Setup and `config status` also make one cheap authenticated request against
+the provider (a models-list endpoint, or `/api/tags` for Ollama) so a typo'd
+or revoked key is caught immediately instead of on the first agent turn. Pass
+`--offline` to skip the live check; network failures during setup only warn
+and never discard a finished setup.
+
 Beyond the active provider and model, the config supports:
 
 ```toml

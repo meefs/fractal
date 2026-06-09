@@ -585,6 +585,22 @@ def build_lm(
     return get_provider(selection.provider).build_lm(selection, env=env)
 
 
+def resolve_api_key(
+    selection: ProviderSelection,
+    *,
+    env: Mapping[str, str] | None = None,
+) -> str | None:
+    """Return the provider's API key, or None for providers without one."""
+    definition = get_provider(selection.provider)
+    if definition.auth_type != "api_key_env":
+        return None
+    if selection.auth_source == "stored":
+        return _require_stored_api_key(selection, definition)
+    env_name = _require_api_key_env(selection, definition, env=env)
+    values = os.environ if env is None else env
+    return values[env_name]
+
+
 def validate_provider_selection(
     selection: ProviderSelection,
 ) -> None:
