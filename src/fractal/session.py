@@ -30,6 +30,24 @@ class UserTurn(BaseModel):
     message: str
 
 
+class TurnUsage(BaseModel):
+    """Host-recorded LM accounting for one agent turn.
+
+    Derived from the PredictRLM RunTrace, not from model output, so it stays
+    trustworthy across failed and interrupted turns.
+    """
+
+    input_tokens: int = Field(default=0, ge=0)
+    output_tokens: int = Field(default=0, ge=0)
+    cost: float = Field(default=0.0, ge=0.0)
+    duration_ms: int = Field(default=0, ge=0)
+    iterations: int = Field(default=0, ge=0)
+    # Prompt tokens of the turn's final main-LM call. Fractal's RLM loop keeps
+    # context bounded via summaries, so this is the live "context size" figure
+    # rather than a cumulative count.
+    context_tokens: int = Field(default=0, ge=0)
+
+
 class AgentTurn(BaseModel):
     status: Literal["succeeded", "failed", "max_iterations", "interrupted"]
     response: str = ""
@@ -37,6 +55,7 @@ class AgentTurn(BaseModel):
     files_changed_count: int = Field(default=0, ge=0)
     commands_run_count: int = Field(default=0, ge=0)
     error: str | None = None
+    usage: TurnUsage | None = None
 
 
 class SummaryTurn(BaseModel):
@@ -221,6 +240,7 @@ class FractalSession:
             files_changed_count=len(files_modified_list),
             commands_run_count=len(commands_run_list),
             error=error,
+            usage=turn_usage_from_trace(trace),
         )
         history_turn = self._find_history_turn(turn_id or summary_turn.turn_id)
         if history_turn is None:
@@ -252,6 +272,49 @@ class FractalSession:
 
     def _enforce_history_limit(self) -> None:
         self.state.history = self.state.history[-MAX_HISTORY_TURNS:]
+
+    def usage_totals(self) -> TurnUsage:
+        return summarize_usage(self.state.summary)
+
+
+def summarize_usage(summary: SessionSummary) -> TurnUsage:
+    """Aggregate recorded usage across all turns in a session summary.
+
+    ``context_tokens`` is not summed; it carries the most recent turn's live
+    context size since the RLM loop re-summarizes between turns.
+    """
+    totals = TurnUsage()
+    for turn in summary.turns:
+        usage = turn.agent.usage if turn.agent is not None else None
+        if usage is None:
+            continue
+        totals.input_tokens += usage.input_tokens
+        totals.output_tokens += usage.output_tokens
+        totals.cost += usage.cost
+        totals.duration_ms += usage.duration_ms
+        totals.iterations += usage.iterations
+        if usage.context_tokens:
+            totals.context_tokens = usage.context_tokens
+    return totals
+
+
+def turn_usage_from_trace(trace: RunTrace | None) -> TurnUsage | None:
+    if trace is None:
+        return None
+    context_tokens = 0
+    for step in reversed(trace.steps):
+        prompt_tokens = step.usage.main_lm.get("prompt_tokens")
+        if isinstance(prompt_tokens, int) and prompt_tokens > 0:
+            context_tokens = prompt_tokens
+            break
+    return TurnUsage(
+        input_tokens=trace.usage.main.input_tokens + trace.usage.sub.input_tokens,
+        output_tokens=trace.usage.main.output_tokens + trace.usage.sub.output_tokens,
+        cost=trace.usage.main.cost + trace.usage.sub.cost,
+        duration_ms=trace.duration_ms,
+        iterations=trace.iterations,
+        context_tokens=context_tokens,
+    )
 
 
 def render_session_summary(summary: SessionSummary) -> str:
