@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 from typing import Literal, Protocol
@@ -24,7 +24,7 @@ OPENROUTER = "openrouter"
 OLLAMA = "ollama"
 CUSTOM_OPENAI_COMPATIBLE = "custom-openai-compatible"
 ProviderAuthType = Literal["api_key_env", "codex_cli", "none"]
-ProviderAuthSource = Literal["env", "codex-cli", "local"]
+ProviderAuthSource = Literal["env", "stored", "codex-cli", "local"]
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
 
 
@@ -138,6 +138,10 @@ class ProviderDefinition:
 @dataclass(frozen=True)
 class ApiKeyStringLMRuntime:
     model: str
+    # None means litellm resolves the key from the env var at call time; a
+    # value means the key came from Fractal's credential store. repr is
+    # suppressed so the secret never lands in logs or tracebacks.
+    api_key: str | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
@@ -167,7 +171,8 @@ class ApiKeyStringLMBehavior:
     ) -> None:
         _validate_auth_source(selection, definition)
         _selection_model(selection, definition)
-        _api_key_env_name(selection, definition)
+        if selection.auth_source != "stored":
+            _api_key_env_name(selection, definition)
 
     def check_readiness(
         self,
@@ -184,8 +189,19 @@ class ApiKeyStringLMBehavior:
         definition: ProviderDefinition,
         *,
         env: Mapping[str, str] | None,
-    ) -> str:
-        return self._runtime(selection, definition, env=env).model
+    ) -> RuntimeLM:
+        runtime = self._runtime(selection, definition, env=env)
+        if runtime.api_key is None:
+            return runtime.model
+
+        try:
+            import dspy
+        except ImportError as exc:
+            raise ProviderConfigError(
+                f"provider {definition.id!r} requires DSPy for stored API keys"
+            ) from exc
+
+        return dspy.LM(model=runtime.model, api_key=runtime.api_key)
 
     def _runtime(
         self,
@@ -195,9 +211,14 @@ class ApiKeyStringLMBehavior:
         env: Mapping[str, str] | None,
     ) -> ApiKeyStringLMRuntime:
         self.validate_shape(selection, definition)
-        _require_api_key_env(selection, definition, env=env)
+        api_key: str | None = None
+        if selection.auth_source == "stored":
+            api_key = _require_stored_api_key(selection, definition)
+        else:
+            _require_api_key_env(selection, definition, env=env)
         return ApiKeyStringLMRuntime(
-            model=_normalize_model(_selection_model(selection, definition), definition)
+            model=_normalize_model(_selection_model(selection, definition), definition),
+            api_key=api_key,
         )
 
 
@@ -256,6 +277,10 @@ class CustomOpenAICompatibleBehavior:
     ) -> None:
         _validate_auth_source(selection, definition)
         _custom_openai_base_url(selection)
+        if selection.auth_source != "stored" and not selection.api_key_env:
+            raise ProviderConfigError(
+                "custom OpenAI-compatible provider requires api_key_env"
+            )
 
     def check_readiness(
         self,
@@ -295,13 +320,18 @@ class CustomOpenAICompatibleBehavior:
         *,
         env: Mapping[str, str] | None,
     ) -> CustomOpenAIRuntime:
+        self.validate_shape(selection, definition)
         base_url = _custom_openai_base_url(selection)
-        env_name = _require_api_key_env(selection, definition, env=env)
-        values = os.environ if env is None else env
+        if selection.auth_source == "stored":
+            api_key = _require_stored_api_key(selection, definition)
+        else:
+            env_name = _require_api_key_env(selection, definition, env=env)
+            values = os.environ if env is None else env
+            api_key = values[env_name]
         return CustomOpenAIRuntime(
             model=_normalize_model(_selection_model(selection, definition), definition),
             base_url=base_url,
-            api_key=values[env_name],
+            api_key=api_key,
         )
 
 
@@ -590,7 +620,10 @@ def _validate_auth_source(
     selection: ProviderSelection,
     definition: ProviderDefinition,
 ) -> None:
-    if selection.auth_source in {None, definition.auth_source}:
+    allowed: set[ProviderAuthSource | None] = {None, definition.auth_source}
+    if definition.auth_type == "api_key_env":
+        allowed.add("stored")
+    if selection.auth_source in allowed:
         return
     raise ProviderConfigError(
         f"provider {definition.id!r} requires auth_source={definition.auth_source!r}"
@@ -618,6 +651,21 @@ def _api_key_env_name(
             f"provider {definition.id!r} requires an API key env var name"
         )
     return env_name
+
+
+def _require_stored_api_key(
+    selection: ProviderSelection,
+    definition: ProviderDefinition,
+) -> str:
+    from .credentials import get_stored_credential
+
+    api_key = get_stored_credential(selection.provider)
+    if not api_key:
+        raise MissingProviderCredentialError(
+            f"provider {definition.id!r} has no stored API key. "
+            "Run `fractal config setup` to store one."
+        )
+    return api_key
 
 
 def _require_api_key_env(
@@ -711,9 +759,5 @@ def _custom_openai_base_url(
         raise ProviderConfigError(
             "custom OpenAI-compatible provider requires base_url to be an "
             "HTTP(S) URL"
-        )
-    if not selection.api_key_env:
-        raise ProviderConfigError(
-            "custom OpenAI-compatible provider requires api_key_env"
         )
     return base_url

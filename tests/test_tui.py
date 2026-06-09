@@ -849,7 +849,7 @@ def test_terminal_tui_provider_command_runs_setup(
     monkeypatch.setenv("OPENAI_API_KEY", "sk-secret-value")
     runtime = FakeRuntime(tmp_path)
     console, output = capture_console()
-    input_stream = StringIO("/provider\n2\n1\n\n/exit\n")
+    input_stream = StringIO("/provider\n2\n1\n2\n\n/exit\n")
     app = TerminalFractalApp(
         runtime,
         console=console,

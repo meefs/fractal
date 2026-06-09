@@ -51,7 +51,7 @@ class ProviderConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    auth_source: Literal["env", "codex-cli", "local"] | None = None
+    auth_source: Literal["env", "stored", "codex-cli", "local"] | None = None
     api_key_env: str | None = None
     base_url: str | None = None
 
@@ -229,6 +229,8 @@ def render_effective_config(config: EffectiveFractalConfig) -> str:
         lines.append(f"sub_model: {config.sub_model}")
     if provider_config.auth_source is not None:
         lines.append(f"auth_source: {provider_config.auth_source}")
+    if provider_config.auth_source == "stored":
+        lines.append("api_key: stored in local credentials file")
     if provider_config.api_key_env is not None:
         lines.append(f"api_key_env: {REDACTED}")
     if provider_config.base_url is not None:

@@ -61,7 +61,12 @@ without a Fractal update. `ollama` talks to a local Ollama server and needs no
 API key; setup asks for the server URL and defaults to
 `http://localhost:11434`.
 
-If setup finds the chosen API-key environment variable unset, it still writes
+For API-key providers, setup asks how to provide the key: paste it directly
+(the default), or reference an environment variable. Pasted keys are stored in
+`~/.config/fractal/credentials.toml` with `0600` permissions, next to the
+config but never inside it; the config records only `auth_source = "stored"`.
+
+If setup uses an environment variable that is currently unset, it still writes
 the config (which never contains secrets) and prints the exact variable to
 export; `fractal config status` verifies readiness afterwards.
 

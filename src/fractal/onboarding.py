@@ -6,6 +6,8 @@ from typing import Any, TextIO
 
 
 CUSTOM_MODEL_SENTINEL = "__custom_model__"
+KEY_SOURCE_PASTE = "paste"
+KEY_SOURCE_ENV = "env"
 
 
 class SetupInputError(ValueError):
@@ -271,21 +273,32 @@ def _prompt_provider_settings_line(
                 label=provider.base_url_label,
             )
 
+    auth_source = provider.auth_source
     api_key_env = None
     if provider.auth_type == "api_key_env":
         if provider.default_api_key_env is None:
             raise SetupInputError(
                 f"provider {provider.id!r} requires a default API key env var"
             )
-        api_key_env = _prompt(
-            stdin=stdin,
-            stdout=stdout,
-            label="API key environment variable",
-            default=provider.default_api_key_env,
-        )
+        source = _prompt_key_source_line(stdin=stdin, stdout=stdout, provider=provider)
+        if source == KEY_SOURCE_PASTE:
+            api_key = _prompt_required(
+                stdin=stdin,
+                stdout=stdout,
+                label=f"{provider.display_name} API key",
+            )
+            _store_pasted_key(provider_id=provider.id, api_key=api_key, stdout=stdout)
+            auth_source = "stored"
+        else:
+            api_key_env = _prompt(
+                stdin=stdin,
+                stdout=stdout,
+                label="API key environment variable",
+                default=provider.default_api_key_env,
+            )
 
     return ProviderConfig(
-        auth_source=provider.auth_source,
+        auth_source=auth_source,
         api_key_env=api_key_env,
         base_url=base_url,
     )
@@ -313,22 +326,40 @@ def _prompt_provider_settings_interactive(
             required=True,
         )
 
+    auth_source = provider.auth_source
     api_key_env = None
     if provider.auth_type == "api_key_env":
         if provider.default_api_key_env is None:
             raise SetupInputError(
                 f"provider {provider.id!r} requires a default API key env var"
             )
-        api_key_env = _prompt_text_interactive(
-            title=provider.display_name,
-            label="API key environment variable",
-            stdout=stdout,
-            default=provider.default_api_key_env,
-            required=True,
+        source = _choose_from_menu(
+            title=f"{provider.display_name} API key",
+            text="How do you want to provide your API key?",
+            choices=_key_source_menu_choices(provider),
+            default=KEY_SOURCE_PASTE,
         )
+        if source == KEY_SOURCE_PASTE:
+            api_key = _prompt_text_interactive(
+                title=provider.display_name,
+                label="API key",
+                stdout=stdout,
+                required=True,
+                secret=True,
+            )
+            _store_pasted_key(provider_id=provider.id, api_key=api_key, stdout=stdout)
+            auth_source = "stored"
+        else:
+            api_key_env = _prompt_text_interactive(
+                title=provider.display_name,
+                label="API key environment variable",
+                stdout=stdout,
+                default=provider.default_api_key_env,
+                required=True,
+            )
 
     return ProviderConfig(
-        auth_source=provider.auth_source,
+        auth_source=auth_source,
         api_key_env=api_key_env,
         base_url=base_url,
     )
@@ -356,25 +387,86 @@ async def _prompt_provider_settings_interactive_async(
             required=True,
         )
 
+    auth_source = provider.auth_source
     api_key_env = None
     if provider.auth_type == "api_key_env":
         if provider.default_api_key_env is None:
             raise SetupInputError(
                 f"provider {provider.id!r} requires a default API key env var"
             )
-        api_key_env = await _prompt_text_interactive_async(
-            title=provider.display_name,
-            label="API key environment variable",
-            stdout=stdout,
-            default=provider.default_api_key_env,
-            required=True,
+        source = await _choose_from_menu_async(
+            title=f"{provider.display_name} API key",
+            text="How do you want to provide your API key?",
+            choices=_key_source_menu_choices(provider),
+            default=KEY_SOURCE_PASTE,
         )
+        if source == KEY_SOURCE_PASTE:
+            api_key = await _prompt_text_interactive_async(
+                title=provider.display_name,
+                label="API key",
+                stdout=stdout,
+                required=True,
+                secret=True,
+            )
+            _store_pasted_key(provider_id=provider.id, api_key=api_key, stdout=stdout)
+            auth_source = "stored"
+        else:
+            api_key_env = await _prompt_text_interactive_async(
+                title=provider.display_name,
+                label="API key environment variable",
+                stdout=stdout,
+                default=provider.default_api_key_env,
+                required=True,
+            )
 
     return ProviderConfig(
-        auth_source=provider.auth_source,
+        auth_source=auth_source,
         api_key_env=api_key_env,
         base_url=base_url,
     )
+
+
+def _key_source_menu_choices(provider: Any) -> list[MenuChoice]:
+    return [
+        MenuChoice(
+            value=KEY_SOURCE_PASTE,
+            label="Paste API key now",
+            detail="stored locally in Fractal's credentials file, never in config",
+        ),
+        MenuChoice(
+            value=KEY_SOURCE_ENV,
+            label="Use an environment variable",
+            detail=f"reference a variable like {provider.default_api_key_env}",
+        ),
+    ]
+
+
+def _prompt_key_source_line(*, stdin: TextIO, stdout: TextIO, provider: Any) -> str:
+    print(
+        f"How do you want to provide your {provider.display_name} API key?",
+        file=stdout,
+    )
+    print("1. Paste it now (stored locally, never in config)", file=stdout)
+    print("2. Use an environment variable", file=stdout)
+    while True:
+        answer = _prompt(
+            stdin=stdin,
+            stdout=stdout,
+            label="API key source",
+            default="1",
+        )
+        if answer in {"1", KEY_SOURCE_PASTE}:
+            return KEY_SOURCE_PASTE
+        if answer in {"2", KEY_SOURCE_ENV}:
+            return KEY_SOURCE_ENV
+        print("Choose 1 (paste) or 2 (environment variable).", file=stdout)
+
+
+def _store_pasted_key(*, provider_id: str, api_key: str, stdout: TextIO) -> None:
+    from .credentials import store_credential
+
+    path = store_credential(provider_id, api_key)
+    print(f"API key stored in {path}", file=stdout)
 
 
 def _prompt(
@@ -546,6 +638,7 @@ def _prompt_text_interactive(
     stdout: TextIO,
     default: str | None = None,
     required: bool = False,
+    secret: bool = False,
 ) -> str:
     from prompt_toolkit.shortcuts import prompt
 
@@ -555,6 +648,7 @@ def _prompt_text_interactive(
             [("class:prompt", f"{label}: ")],
             default=default or "",
             style=_interactive_style(),
+            is_password=secret,
         )
     except (KeyboardInterrupt, EOFError) as exc:
         raise SetupInputError("setup canceled") from exc
@@ -575,6 +669,7 @@ async def _prompt_text_interactive_async(
     stdout: TextIO,
     default: str | None = None,
     required: bool = False,
+    secret: bool = False,
 ) -> str:
     from prompt_toolkit import PromptSession
 
@@ -583,6 +678,7 @@ async def _prompt_text_interactive_async(
         result = await PromptSession(style=_interactive_style()).prompt_async(
             [("class:prompt", f"{label}: ")],
             default=default or "",
+            is_password=secret,
         )
     except (KeyboardInterrupt, EOFError) as exc:
         raise SetupInputError("setup canceled") from exc
