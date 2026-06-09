@@ -27,6 +27,19 @@ uv run fractal config status
 uv run fractal config show
 ```
 
+For scripts and quick edits there is non-interactive dotted-key access. `set`
+parses TOML literals (`12`, `true`) and falls back to strings; values are
+validated against the schema before anything is written, and raw secrets are
+rejected. `--project` targets the workspace config instead of the global one:
+
+```bash
+uv run fractal config get active_model
+uv run fractal config set active_model gpt-5.4-mini
+uv run fractal config set defaults.max_iterations 12
+uv run fractal config set active_model gpt-5.4 --project
+uv run fractal config unset active_sub_model
+```
+
 The default config path is `~/.config/fractal/config.toml`, or
 `$XDG_CONFIG_HOME/fractal/config.toml` when `XDG_CONFIG_HOME` is set. The config
 stores provider ids, model names, auth source metadata, API-key environment

@@ -125,6 +125,32 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="skip the live provider connectivity check after setup",
     )
+    get_parser = config_subparsers.add_parser(
+        "get",
+        help="print one effective config value by dotted key",
+    )
+    get_parser.add_argument("key", help="dotted key, e.g. defaults.max_iterations")
+    set_parser = config_subparsers.add_parser(
+        "set",
+        help="set one config value by dotted key",
+    )
+    set_parser.add_argument("key", help="dotted key, e.g. active_model")
+    set_parser.add_argument("value", help="TOML literal or bare string")
+    set_parser.add_argument(
+        "--project",
+        action="store_true",
+        help="write to the workspace project config instead of the global config",
+    )
+    unset_parser = config_subparsers.add_parser(
+        "unset",
+        help="remove one config value by dotted key",
+    )
+    unset_parser.add_argument("key", help="dotted key, e.g. active_sub_model")
+    unset_parser.add_argument(
+        "--project",
+        action="store_true",
+        help="edit the workspace project config instead of the global config",
+    )
     return parser
 
 

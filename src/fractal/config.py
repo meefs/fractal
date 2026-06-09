@@ -356,7 +356,23 @@ def write_config(config: FractalConfig, path: str | Path | None = None) -> Path:
     payload = validated.model_dump(mode="python", exclude_none=True)
     if not payload.get("defaults"):
         payload.pop("defaults", None)
+    return _write_toml_file(config_path, payload)
 
+
+def write_project_config(
+    config: ProjectFractalConfig,
+    workspace: str | Path,
+) -> Path:
+    config_path = project_config_path(workspace)
+    validated = ProjectFractalConfig.model_validate(config.model_dump(mode="python"))
+    payload = validated.model_dump(mode="python", exclude_none=True)
+    for table in ("providers", "defaults"):
+        if not payload.get(table):
+            payload.pop(table, None)
+    return _write_toml_file(config_path, payload)
+
+
+def _write_toml_file(config_path: Path, payload: dict[str, object]) -> Path:
     _ensure_config_dir(config_path.parent)
     try:
         import tomli_w

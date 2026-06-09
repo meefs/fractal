@@ -31,6 +31,25 @@ def run_config_command(
         )
     if args.config_command == "setup":
         return config_setup(stdin=stdin, stdout=stdout, stderr=stderr, offline=offline)
+    if args.config_command == "get":
+        return config_get(args.key, stdout=stdout, stderr=stderr, workspace=workspace)
+    if args.config_command == "set":
+        return config_set(
+            args.key,
+            args.value,
+            stdout=stdout,
+            stderr=stderr,
+            project=bool(getattr(args, "project", False)),
+            workspace=workspace,
+        )
+    if args.config_command == "unset":
+        return config_unset(
+            args.key,
+            stdout=stdout,
+            stderr=stderr,
+            project=bool(getattr(args, "project", False)),
+            workspace=workspace,
+        )
     print(f"fractal config: unknown command {args.config_command!r}", file=stderr)
     return 1
 
@@ -187,3 +206,192 @@ def config_setup(
                 file=stderr,
             )
     return 0
+
+
+def config_get(
+    key: str,
+    *,
+    stdout: TextIO,
+    stderr: TextIO,
+    workspace: Any | None = None,
+) -> int:
+    from .config import FractalConfigError, load_layered_config
+
+    try:
+        result = load_layered_config(workspace=workspace)
+    except FractalConfigError as exc:
+        print(f"fractal config: {exc}", file=stderr)
+        return 1
+    if result.config is None:
+        print("fractal config: not configured; run `fractal config setup`.", file=stderr)
+        return 1
+
+    data = result.config.model_dump(mode="python", exclude_none=True)
+    found, value = _walk_config_path(data, key)
+    if not found:
+        print(f"fractal config: {key} is not set", file=stderr)
+        return 1
+    print(_format_config_value(value), file=stdout)
+    return 0
+
+
+def config_set(
+    key: str,
+    raw_value: str,
+    *,
+    stdout: TextIO,
+    stderr: TextIO,
+    project: bool = False,
+    workspace: Any | None = None,
+) -> int:
+    from pathlib import Path
+
+    from .config import (
+        FractalConfig,
+        FractalConfigError,
+        ProjectFractalConfig,
+        load_config,
+        load_project_config,
+        write_config,
+        write_project_config,
+    )
+
+    value = _parse_config_value(raw_value)
+    try:
+        if project:
+            target_workspace = Path(workspace) if workspace is not None else Path.cwd()
+            current = load_project_config(target_workspace) or ProjectFractalConfig()
+            data = current.model_dump(mode="python", exclude_none=True)
+            _set_config_path(data, key, value)
+            updated = ProjectFractalConfig.model_validate(data)
+            path = write_project_config(updated, target_workspace)
+        else:
+            result = load_config()
+            if result.config is None:
+                print(
+                    "fractal config: not configured; run `fractal config setup` "
+                    "first or use `--project`.",
+                    file=stderr,
+                )
+                return 1
+            data = result.config.model_dump(mode="python", exclude_none=True)
+            _set_config_path(data, key, value)
+            updated = FractalConfig.model_validate(data)
+            path = write_config(updated, path=result.path)
+    except FractalConfigError as exc:
+        print(f"fractal config: {exc}", file=stderr)
+        return 1
+    except ValueError as exc:
+        print(f"fractal config: cannot set {key}: {exc}", file=stderr)
+        return 1
+
+    print(f"set {key} = {_format_config_value(value)} in {path}", file=stdout)
+    return 0
+
+
+def config_unset(
+    key: str,
+    *,
+    stdout: TextIO,
+    stderr: TextIO,
+    project: bool = False,
+    workspace: Any | None = None,
+) -> int:
+    from pathlib import Path
+
+    from .config import (
+        FractalConfig,
+        FractalConfigError,
+        ProjectFractalConfig,
+        load_config,
+        load_project_config,
+        write_config,
+        write_project_config,
+    )
+
+    try:
+        if project:
+            target_workspace = Path(workspace) if workspace is not None else Path.cwd()
+            current = load_project_config(target_workspace)
+            if current is None:
+                print("fractal config: no project config found", file=stderr)
+                return 1
+            data = current.model_dump(mode="python", exclude_none=True)
+            if not _unset_config_path(data, key):
+                print(f"fractal config: {key} is not set", file=stderr)
+                return 1
+            updated = ProjectFractalConfig.model_validate(data)
+            path = write_project_config(updated, target_workspace)
+        else:
+            result = load_config()
+            if result.config is None:
+                print("fractal config: not configured", file=stderr)
+                return 1
+            data = result.config.model_dump(mode="python", exclude_none=True)
+            if not _unset_config_path(data, key):
+                print(f"fractal config: {key} is not set", file=stderr)
+                return 1
+            updated = FractalConfig.model_validate(data)
+            path = write_config(updated, path=result.path)
+    except FractalConfigError as exc:
+        print(f"fractal config: {exc}", file=stderr)
+        return 1
+    except ValueError as exc:
+        print(f"fractal config: cannot unset {key}: {exc}", file=stderr)
+        return 1
+
+    print(f"unset {key} in {path}", file=stdout)
+    return 0
+
+
+def _parse_config_value(raw: str) -> Any:
+    import tomllib
+
+    try:
+        return tomllib.loads(f"value = {raw}")["value"]
+    except tomllib.TOMLDecodeError:
+        return raw
+
+
+def _format_config_value(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, dict):
+        import tomli_w
+
+        return tomli_w.dumps(value).strip()
+    return str(value)
+
+
+def _walk_config_path(data: Any, key: str) -> tuple[bool, Any]:
+    node = data
+    for part in key.split("."):
+        if not isinstance(node, dict) or part not in node:
+            return False, None
+        node = node[part]
+    return True, node
+
+
+def _set_config_path(data: dict[str, Any], key: str, value: Any) -> None:
+    parts = key.split(".")
+    node: Any = data
+    for part in parts[:-1]:
+        if part not in node or not isinstance(node[part], dict):
+            node[part] = {}
+        node = node[part]
+    if not isinstance(node, dict):
+        raise ValueError(f"{key} does not address a config table")
+    node[parts[-1]] = value
+
+
+def _unset_config_path(data: dict[str, Any], key: str) -> bool:
+    parts = key.split(".")
+    node: Any = data
+    for part in parts[:-1]:
+        if not isinstance(node, dict) or part not in node:
+            return False
+        node = node[part]
+    if not isinstance(node, dict) or parts[-1] not in node:
+        return False
+    del node[parts[-1]]
+    return True

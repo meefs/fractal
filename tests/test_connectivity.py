@@ -8,6 +8,24 @@ from pathlib import Path
 import pytest
 
 
+def write_api_config(config_home: Path, *, api_key_env: str = "OPENAI_API_KEY") -> Path:
+    path = config_home / "fractal" / "config.toml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"""
+schema_version = 1
+active_provider = "openai-api"
+active_model = "gpt-5.5"
+
+[providers.openai-api]
+auth_source = "env"
+api_key_env = "{api_key_env}"
+""".strip(),
+        encoding="utf-8",
+    )
+    return path
+
+
 def _http_error(url: str, code: int) -> urllib.error.HTTPError:
     return urllib.error.HTTPError(url, code, "error", hdrs=None, fp=None)
 
@@ -100,7 +118,6 @@ def test_config_status_runs_connectivity_check(
     tmp_path: Path,
 ) -> None:
     from fractal import cli
-    from tests.test_cli_config import write_api_config
 
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     monkeypatch.setenv("OPENAI_API_KEY", "sk-secret-value")
@@ -120,7 +137,6 @@ def test_config_status_reports_unreachable_provider(
     tmp_path: Path,
 ) -> None:
     from fractal import cli
-    from tests.test_cli_config import write_api_config
 
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     monkeypatch.setenv("OPENAI_API_KEY", "sk-secret-value")
@@ -147,7 +163,6 @@ def test_config_status_offline_skips_connectivity(
     tmp_path: Path,
 ) -> None:
     from fractal import cli
-    from tests.test_cli_config import write_api_config
 
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     monkeypatch.setenv("OPENAI_API_KEY", "sk-secret-value")
