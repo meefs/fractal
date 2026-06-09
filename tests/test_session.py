@@ -374,3 +374,36 @@ def test_usage_totals_aggregates_across_turns(tmp_path: Path) -> None:
     assert totals.duration_ms == 1000
     assert totals.iterations == 4
     assert totals.context_tokens == 4100
+
+
+def test_list_sessions_orders_and_skips_invalid(tmp_path: Path) -> None:
+    import os
+
+    from fractal.session import FractalSession, list_sessions, sessions_dir_path
+
+    older = FractalSession()
+    older.add_user_message("first request")
+    older.save(tmp_path)
+    newer = FractalSession()
+    newer.add_user_message("second request")
+    newer.save(tmp_path)
+    older_path = sessions_dir_path(tmp_path) / f"{older.session_id}.json"
+    newer_path = sessions_dir_path(tmp_path) / f"{newer.session_id}.json"
+    os.utime(older_path, (1_000_000, 1_000_000))
+    os.utime(newer_path, (2_000_000, 2_000_000))
+    (sessions_dir_path(tmp_path) / "garbage.json").write_text("not json")
+
+    sessions = list_sessions(tmp_path)
+
+    assert [info.session_id for info in sessions] == [
+        newer.session_id,
+        older.session_id,
+    ]
+    assert sessions[0].first_message == "second request"
+    assert sessions[0].turn_count == 1
+
+
+def test_list_sessions_empty_workspace(tmp_path: Path) -> None:
+    from fractal.session import list_sessions
+
+    assert list_sessions(tmp_path) == []

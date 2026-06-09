@@ -342,6 +342,48 @@ def render_session_summary(summary: SessionSummary) -> str:
     return "\n".join(lines)
 
 
+class SessionInfo(BaseModel):
+    """Lightweight listing entry for a stored workspace session."""
+
+    session_id: str
+    updated_at: str
+    turn_count: int
+    first_message: str
+
+
+def list_sessions(workspace_path: str | Path) -> list[SessionInfo]:
+    """List stored sessions for a workspace, most recently updated first.
+
+    Unreadable or foreign files are skipped; listing is a navigation aid, not
+    a validation pass.
+    """
+    sessions_dir = sessions_dir_path(workspace_path)
+    if not sessions_dir.is_dir():
+        return []
+    entries: list[tuple[float, SessionInfo]] = []
+    for path in sessions_dir.glob("*.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            state = SessionState.model_validate(data)
+            mtime = path.stat().st_mtime
+        except (OSError, json.JSONDecodeError, ValueError):
+            continue
+        turns = state.summary.turns
+        entries.append(
+            (
+                mtime,
+                SessionInfo(
+                    session_id=state.session_id,
+                    updated_at=datetime.fromtimestamp(mtime, timezone.utc).isoformat(),
+                    turn_count=len(turns),
+                    first_message=turns[0].user.message if turns else "",
+                ),
+            )
+        )
+    entries.sort(key=lambda item: item[0], reverse=True)
+    return [info for _, info in entries]
+
+
 def sessions_dir_path(workspace_path: str | Path) -> Path:
     return Path(workspace_path) / SESSION_DIR / SESSIONS_DIR
 
