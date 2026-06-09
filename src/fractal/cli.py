@@ -152,6 +152,7 @@ def run_non_interactive(
     try:
         runtime = FractalRuntime.create(
             workspace_path=workspace,
+            included_paths=args.include,
             lm=args.lm,
             sub_lm=args.sub_lm,
             max_iterations=args.max_iterations,
@@ -220,6 +221,17 @@ def run_non_interactive(
             + ", ".join(result.changed_files),
             file=stderr,
         )
+
+    if not args.quiet:
+        from .session import turn_usage_from_trace
+
+        usage = turn_usage_from_trace(result.trace)
+        if usage is not None and (usage.input_tokens or usage.output_tokens):
+            print(
+                f"fractal: usage {usage.input_tokens:,} in / "
+                f"{usage.output_tokens:,} out tokens, ${usage.cost:.4f}",
+                file=stderr,
+            )
 
     if result.trace is not None and result.trace.status == "max_iterations":
         print("fractal: max iterations reached before completion", file=stderr)
