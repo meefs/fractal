@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+import re
 import signal
 from typing import Protocol, TextIO
 
@@ -26,6 +27,9 @@ from fractal.events import FractalRuntimeEvent
 from fractal.session import (
     SessionSummary,
     SummaryTurn,
+    TurnUsage,
+    list_sessions,
+    summarize_usage,
     turn_usage_from_trace,
 )
 from predict_rlm import RunTrace
@@ -39,7 +43,12 @@ PROMPT_STYLE = Style.from_dict(
     }
 )
 SLASH_COMMANDS = {
+    "/help": "Show available commands",
+    "/sessions": "List resumable sessions in this workspace",
     "/resume": "Resume an existing session by id",
+    "/new": "Start a fresh session",
+    "/usage": "Show token usage and cost for this session",
+    "/verbose": "Toggle verbose RLM iteration output",
     "/exit": "Exit Fractal",
     "/quit": "Exit Fractal",
 }
@@ -118,6 +127,8 @@ class FractalRuntimeLike(Protocol):
     def session(self) -> SessionLike: ...
 
     def resume(self, session_id: str) -> None: ...
+
+    def new_session(self) -> None: ...
 
     async def submit(self, user_message: str, **kwargs: object) -> FractalResult: ...
 
@@ -296,27 +307,93 @@ class TerminalFractalApp:
                 (self.runtime.session_id, "cyan"),
             )
         )
-        self.console.print(Text("Type /exit or /quit to quit.", style="dim"))
+        self.console.print(Text("Type /help for commands, /exit to quit.", style="dim"))
 
     def handle_slash_command(self, message: str) -> bool:
         command, _, rest = message.partition(" ")
-        if command != "/resume":
-            return False
-        session_id = rest.strip()
+        rest = rest.strip()
+        if command == "/resume":
+            self._handle_resume(rest)
+            return True
+        if command == "/help":
+            self._handle_help()
+            return True
+        if command == "/sessions":
+            self._handle_sessions()
+            return True
+        if command == "/new":
+            self._handle_new_session()
+            return True
+        if command == "/usage":
+            self._handle_usage()
+            return True
+        if command == "/verbose":
+            self.verbose_iterations = not self.verbose_iterations
+            state = "on" if self.verbose_iterations else "off"
+            self.console.print(Text(f"verbose iteration output {state}", style="dim"))
+            return True
+        if _looks_like_slash_command(message):
+            self.console.print(
+                Text(f"unknown command: {command} (try /help)", style="yellow")
+            )
+            return True
+        return False
+
+    def _handle_resume(self, session_id: str) -> None:
         if not session_id:
             self.console.print(Text("usage: /resume <session-id>", style="yellow"))
-            return True
+            return
         try:
             self.runtime.resume(session_id)
         except FileNotFoundError as exc:
             self.console.print(Text(str(exc), style="red"))
-            return True
+            return
+        self._reset_rendered_state()
+        self.console.print(Text(f"resumed session {self.runtime.session_id}", style="dim"))
+        self.render_new_turns()
+
+    def _handle_help(self) -> None:
+        table = Table.grid(padding=(0, 2))
+        table.add_column(no_wrap=True)
+        table.add_column()
+        for command, description in SLASH_COMMANDS.items():
+            table.add_row(Text(command, style="cyan"), Text(description, style="dim"))
+        self.console.print(table)
+
+    def _handle_sessions(self) -> None:
+        sessions = list_sessions(self.runtime.workspace_path)
+        if not sessions:
+            self.console.print(Text("No stored sessions in this workspace.", style="dim"))
+            return
+        table = Table.grid(padding=(0, 2))
+        table.add_column(no_wrap=True)
+        table.add_column(no_wrap=True, justify="right")
+        table.add_column(overflow="ellipsis", max_width=48)
+        for info in sessions:
+            marker = " (current)" if info.session_id == self.runtime.session_id else ""
+            table.add_row(
+                Text.assemble((info.session_id, "cyan"), (marker, "dim")),
+                Text(f"{info.turn_count} turns", style="dim"),
+                Text(info.first_message or "(empty)", style="dim"),
+            )
+        self.console.print(table)
+        self.console.print(Text("Resume one with /resume <session-id>.", style="dim"))
+
+    def _handle_new_session(self) -> None:
+        self.runtime.new_session()
+        self._reset_rendered_state()
+        self.console.print(
+            Text(f"started new session {self.runtime.session_id}", style="dim")
+        )
+
+    def _handle_usage(self) -> None:
+        totals = summarize_usage(self.runtime.session.summary_model)
+        self.console.print(render_usage_report(totals))
+
+    def _reset_rendered_state(self) -> None:
         self._rendered_turn_ids.clear()
         self._pending_turn_ids.clear()
         self._prompt_echo_turn_ids.clear()
-        self.console.print(Text(f"resumed session {self.runtime.session_id}", style="dim"))
-        self.render_new_turns()
-        return True
 
     def render_new_turns(self) -> None:
         for turn in self.runtime.session.summary_model.turns:
@@ -520,10 +597,18 @@ def render_prompt_label() -> Text:
 
 
 def _will_submit_turn(message: str) -> bool:
-    if not message or message in {"/exit", "/quit"}:
+    if not message:
         return False
+    return not _looks_like_slash_command(message)
+
+
+def _looks_like_slash_command(message: str) -> bool:
     command, _, _ = message.partition(" ")
-    return command != "/resume"
+    if command in SLASH_COMMANDS:
+        return True
+    # A leading "/word" reads as a command attempt; absolute paths and other
+    # slash-containing prompts fall through to the agent.
+    return bool(re.fullmatch(r"/[A-Za-z][A-Za-z0-9_-]*", command))
 
 
 def render_agent_message(turn: SummaryTurn, *, pending: bool = False) -> object:
@@ -588,6 +673,27 @@ def render_changed_files(changed_files: list[str]) -> Text:
     text = Text("  changed: ", style="dim")
     text.append(", ".join(changed_files), style="yellow")
     return text
+
+
+def render_usage_report(totals: TurnUsage) -> Group:
+    if not (totals.input_tokens or totals.output_tokens or totals.iterations):
+        return Group(Text("No recorded usage for this session yet.", style="dim"))
+    table = Table.grid(padding=(0, 2))
+    table.add_column(no_wrap=True)
+    table.add_column(justify="right")
+    table.add_row(Text("input tokens", style="dim"), Text(f"{totals.input_tokens:,}"))
+    table.add_row(Text("output tokens", style="dim"), Text(f"{totals.output_tokens:,}"))
+    if totals.context_tokens:
+        table.add_row(
+            Text("current context", style="dim"),
+            Text(f"~{totals.context_tokens:,} tokens"),
+        )
+    table.add_row(Text("iterations", style="dim"), Text(f"{totals.iterations:,}"))
+    table.add_row(
+        Text("agent time", style="dim"), Text(_format_duration(totals.duration_ms))
+    )
+    table.add_row(Text("cost", style="dim"), Text(f"${totals.cost:.4f}"))
+    return Group(table)
 
 
 def _format_tokens(count: int) -> str:

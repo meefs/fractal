@@ -91,6 +91,9 @@ class FractalRuntime:
             raise FileNotFoundError(f"No Fractal session found for id {session_id!r}.")
         self.session = FractalSession.load(self.workspace_path, session_id=session_id)
 
+    def new_session(self) -> None:
+        self.session = FractalSession()
+
     @property
     def session_id(self) -> str:
         return self.session.session_id
