@@ -23,7 +23,11 @@ from rich.theme import Theme
 
 from fractal.agent.schema import FractalIterationEvent, FractalResult
 from fractal.events import FractalRuntimeEvent
-from fractal.session import SessionSummary, SummaryTurn
+from fractal.session import (
+    SessionSummary,
+    SummaryTurn,
+    turn_usage_from_trace,
+)
 from predict_rlm import RunTrace
 from predict_rlm.trace import IterationStep
 
@@ -174,10 +178,9 @@ class TerminalFractalApp:
                 result = await self.run_turn(message)
                 if result is None:
                     continue
-                if result.trace is not None and result.trace.status == "max_iterations":
-                    self.console.print(Text("! max iterations", style="yellow"))
-                else:
-                    self.console.print(Text("✓ complete"))
+                self.console.print(render_turn_footer(result))
+                if result.changed_files:
+                    self.console.print(render_changed_files(result.changed_files))
                 if result.trace is not None and self._last_turn_live_iteration_count == 0:
                     self.console.print(
                         render_trace_summary(
@@ -550,6 +553,59 @@ def render_agent_message(turn: SummaryTurn, *, pending: bool = False) -> object:
 
 def render_agent_response(turn: SummaryTurn, *, pending: bool = False) -> Padding:
     return Padding(render_agent_message(turn, pending=pending), (0, 0, 0, 2))
+
+
+def render_turn_footer(result: FractalResult) -> Text:
+    if result.trace is not None and result.trace.status == "max_iterations":
+        footer = Text("! max iterations", style="yellow")
+    else:
+        footer = Text("✓ complete")
+    usage = turn_usage_from_trace(result.trace)
+    if usage is None:
+        return footer
+    parts: list[str] = []
+    if usage.iterations:
+        unit = "iteration" if usage.iterations == 1 else "iterations"
+        parts.append(f"{usage.iterations} {unit}")
+    if usage.duration_ms:
+        parts.append(_format_duration(usage.duration_ms))
+    if usage.input_tokens or usage.output_tokens:
+        parts.append(
+            f"{_format_tokens(usage.input_tokens)} in / "
+            f"{_format_tokens(usage.output_tokens)} out"
+        )
+    if usage.context_tokens:
+        parts.append(f"{_format_tokens(usage.context_tokens)} ctx")
+    if usage.cost:
+        parts.append(f"${usage.cost:.4f}")
+    for part in parts:
+        footer.append(" · ", style="dim")
+        footer.append(part, style="dim")
+    return footer
+
+
+def render_changed_files(changed_files: list[str]) -> Text:
+    text = Text("  changed: ", style="dim")
+    text.append(", ".join(changed_files), style="yellow")
+    return text
+
+
+def _format_tokens(count: int) -> str:
+    if count >= 1_000_000:
+        return f"{count / 1_000_000:.1f}M"
+    if count >= 1_000:
+        return f"{count / 1_000:.1f}k"
+    return str(count)
+
+
+def _format_duration(duration_ms: int) -> str:
+    if duration_ms < 1_000:
+        return f"{duration_ms}ms"
+    seconds = duration_ms / 1_000
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes = int(seconds // 60)
+    return f"{minutes}m {seconds - minutes * 60:.0f}s"
 
 
 def _line_count(text: str) -> int:

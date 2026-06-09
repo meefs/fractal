@@ -842,3 +842,62 @@ def test_slash_command_completer_lists_commands() -> None:
 
     assert [completion.text for completion in resume] == ["/resume"]
     assert none_after_space == []
+
+
+def _usage_trace() -> object:
+    from predict_rlm.trace import (
+        IterationStep,
+        IterationUsage,
+        LMUsage,
+        RunTrace,
+        TokenUsage,
+    )
+
+    return RunTrace(
+        status="completed",
+        model="test-model",
+        iterations=2,
+        max_iterations=3,
+        duration_ms=12_400,
+        usage=LMUsage(
+            main=TokenUsage(input_tokens=8200, output_tokens=400, cost=0.0413),
+        ),
+        steps=[
+            IterationStep(
+                iteration=1,
+                reasoning="r",
+                code="x = 1",
+                output="ok",
+                untruncated_output="ok",
+                duration_ms=10,
+                usage=IterationUsage(
+                    main_lm={"prompt_tokens": 7421, "completion_tokens": 141}
+                ),
+            ),
+        ],
+    )
+
+
+def test_turn_footer_includes_usage_and_context() -> None:
+    from fractal.agent.schema import FractalResult
+    from fractal.tui.app import render_turn_footer
+
+    footer = render_turn_footer(
+        FractalResult(response="done", trace=_usage_trace())
+    ).plain
+
+    assert "✓ complete" in footer
+    assert "2 iterations" in footer
+    assert "12.4s" in footer
+    assert "8.2k in / 400 out" in footer
+    assert "7.4k ctx" in footer
+    assert "$0.0413" in footer
+
+
+def test_turn_footer_without_trace_is_plain_complete() -> None:
+    from fractal.agent.schema import FractalResult
+    from fractal.tui.app import render_turn_footer
+
+    footer = render_turn_footer(FractalResult(response="done")).plain
+
+    assert footer == "✓ complete"
