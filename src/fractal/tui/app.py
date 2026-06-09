@@ -307,6 +307,15 @@ class TerminalFractalApp:
                 (self.runtime.session_id, "cyan"),
             )
         )
+        lm = getattr(self.runtime, "lm", None)
+        sub_lm = getattr(self.runtime, "sub_lm", None)
+        if lm:
+            model_line = Text.assemble(("model ", "dim"), (str(lm), "dim cyan"))
+            if sub_lm and sub_lm != lm:
+                model_line.append_text(
+                    Text.assemble((" | sub ", "dim"), (str(sub_lm), "dim cyan"))
+                )
+            self.console.print(model_line)
         self.console.print(Text("Type /help for commands, /exit to quit.", style="dim"))
 
     def handle_slash_command(self, message: str) -> bool:

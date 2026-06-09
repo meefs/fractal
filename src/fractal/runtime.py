@@ -49,11 +49,15 @@ class FractalRuntime:
         included_paths: list[str | Path] | None = None,
         session: FractalSession,
         agent: FractalAgentLike,
+        lm: str | None = None,
+        sub_lm: str | None = None,
     ) -> None:
         self.workspace_path = Path(workspace_path).resolve()
         self.included_paths = [Path(path).resolve() for path in included_paths or []]
         self.session = session
         self.agent = agent
+        self.lm = lm
+        self.sub_lm = sub_lm
 
     @classmethod
     def create(
@@ -81,6 +85,8 @@ class FractalRuntime:
                 debug=debug,
                 interpreter=create_sbx_interpreter(workspace, included_paths),
             ),
+            lm=lm,
+            sub_lm=sub_lm,
         )
         if session_id is not None:
             runtime.resume(session_id)
