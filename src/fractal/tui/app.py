@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+import re
 import signal
 import sys
 from typing import Protocol, TextIO
@@ -24,7 +25,14 @@ from rich.theme import Theme
 
 from fractal.agent.schema import FractalIterationEvent, FractalResult
 from fractal.events import FractalRuntimeEvent
-from fractal.session import SessionSummary, SummaryTurn
+from fractal.session import (
+    SessionSummary,
+    SummaryTurn,
+    TurnUsage,
+    list_sessions,
+    summarize_usage,
+    turn_usage_from_trace,
+)
 from predict_rlm import RunTrace
 from predict_rlm.trace import IterationStep
 
@@ -36,10 +44,14 @@ PROMPT_STYLE = Style.from_dict(
     }
 )
 SLASH_COMMANDS = {
+    "/help": "Show available commands",
+    "/sessions": "List resumable sessions in this workspace",
+    "/resume": "Resume an existing session by id",
+    "/new": "Start a fresh session",
     "/model": "Change the model (`/model sub` changes the sub-model)",
     "/provider": "Change provider, model, and auth setup",
-    "/resume": "Resume an existing session by id",
-    "/verbose": "Toggle verbose trace display for this session",
+    "/usage": "Show token usage and cost for this session",
+    "/verbose": "Toggle verbose RLM iteration output",
     "/exit": "Exit Fractal",
     "/quit": "Exit Fractal",
 }
@@ -119,6 +131,8 @@ class FractalRuntimeLike(Protocol):
 
     def resume(self, session_id: str) -> None: ...
 
+    def new_session(self) -> None: ...
+
     @property
     def provider_label(self) -> str: ...
 
@@ -194,10 +208,9 @@ class TerminalFractalApp:
                 result = await self.run_turn(message)
                 if result is None:
                     continue
-                if result.trace is not None and result.trace.status == "max_iterations":
-                    self.console.print(Text("! max iterations", style="yellow"))
-                else:
-                    self.console.print(Text("✓ complete"))
+                self.console.print(render_turn_footer(result))
+                if result.changed_files:
+                    self.console.print(render_changed_files(result.changed_files))
                 if result.trace is not None and self._last_turn_live_iteration_count == 0:
                     self.console.print(
                         render_trace_summary(
@@ -313,33 +326,103 @@ class TerminalFractalApp:
                 (self.runtime.session_id, "cyan"),
             )
         )
-        self.console.print(Text("Type /exit or /quit to quit.", style="dim"))
+        lm = getattr(self.runtime, "lm", None)
+        sub_lm = getattr(self.runtime, "sub_lm", None)
+        if lm:
+            model_line = Text.assemble(("model ", "dim"), (str(lm), "dim cyan"))
+            if sub_lm and sub_lm != lm:
+                model_line.append_text(
+                    Text.assemble((" | sub ", "dim"), (str(sub_lm), "dim cyan"))
+                )
+            self.console.print(model_line)
+        self.console.print(Text("Type /help for commands, /exit to quit.", style="dim"))
 
     async def handle_slash_command(self, message: str) -> bool:
         command, _, rest = message.partition(" ")
+        rest = rest.strip()
+        if command == "/resume":
+            self._handle_resume(rest)
+            return True
+        if command == "/help":
+            self._handle_help()
+            return True
+        if command == "/sessions":
+            self._handle_sessions()
+            return True
+        if command == "/new":
+            self._handle_new_session()
+            return True
+        if command == "/usage":
+            self._handle_usage()
+            return True
         if command == "/provider":
             return await self.handle_provider_command(rest)
         if command == "/model":
             return await self.handle_model_command(rest)
         if command == "/verbose":
             return self.handle_verbose_command(rest)
-        if command != "/resume":
-            return False
-        session_id = rest.strip()
+        if _looks_like_slash_command(message):
+            self.console.print(
+                Text(f"unknown command: {command} (try /help)", style="yellow")
+            )
+            return True
+        return False
+
+    def _handle_resume(self, session_id: str) -> None:
         if not session_id:
             self.console.print(Text("usage: /resume <session-id>", style="yellow"))
-            return True
+            return
         try:
             self.runtime.resume(session_id)
         except FileNotFoundError as exc:
             self.console.print(Text(str(exc), style="red"))
-            return True
+            return
+        self._reset_rendered_state()
+        self.console.print(Text(f"resumed session {self.runtime.session_id}", style="dim"))
+        self.render_new_turns()
+
+    def _handle_help(self) -> None:
+        table = Table.grid(padding=(0, 2))
+        table.add_column(no_wrap=True)
+        table.add_column()
+        for command, description in SLASH_COMMANDS.items():
+            table.add_row(Text(command, style="cyan"), Text(description, style="dim"))
+        self.console.print(table)
+
+    def _handle_sessions(self) -> None:
+        sessions = list_sessions(self.runtime.workspace_path)
+        if not sessions:
+            self.console.print(Text("No stored sessions in this workspace.", style="dim"))
+            return
+        table = Table.grid(padding=(0, 2))
+        table.add_column(no_wrap=True)
+        table.add_column(no_wrap=True, justify="right")
+        table.add_column(overflow="ellipsis", max_width=48)
+        for info in sessions:
+            marker = " (current)" if info.session_id == self.runtime.session_id else ""
+            table.add_row(
+                Text.assemble((info.session_id, "cyan"), (marker, "dim")),
+                Text(f"{info.turn_count} turns", style="dim"),
+                Text(info.first_message or "(empty)", style="dim"),
+            )
+        self.console.print(table)
+        self.console.print(Text("Resume one with /resume <session-id>.", style="dim"))
+
+    def _handle_new_session(self) -> None:
+        self.runtime.new_session()
+        self._reset_rendered_state()
+        self.console.print(
+            Text(f"started new session {self.runtime.session_id}", style="dim")
+        )
+
+    def _handle_usage(self) -> None:
+        totals = summarize_usage(self.runtime.session.summary_model)
+        self.console.print(render_usage_report(totals))
+
+    def _reset_rendered_state(self) -> None:
         self._rendered_turn_ids.clear()
         self._pending_turn_ids.clear()
         self._prompt_echo_turn_ids.clear()
-        self.console.print(Text(f"resumed session {self.runtime.session_id}", style="dim"))
-        self.render_new_turns()
-        return True
 
     async def handle_provider_command(self, rest: str) -> bool:
         if rest.strip():
@@ -388,7 +471,7 @@ class TerminalFractalApp:
             self.console.print(Text("usage: /verbose [on|off]", style="yellow"))
             return True
         state = "on" if self.verbose_iterations else "off"
-        self.console.print(Text(f"verbose {state}", style="dim"))
+        self.console.print(Text(f"verbose iteration output {state}", style="dim"))
         return True
 
     async def run_provider_setup(self) -> bool:
@@ -697,10 +780,18 @@ def _existing_config() -> object | None:
 
 
 def _will_submit_turn(message: str) -> bool:
-    if not message or message in {"/exit", "/quit"}:
+    if not message:
         return False
+    return not _looks_like_slash_command(message)
+
+
+def _looks_like_slash_command(message: str) -> bool:
     command, _, _ = message.partition(" ")
-    return command not in {"/model", "/provider", "/resume", "/verbose"}
+    if command in SLASH_COMMANDS:
+        return True
+    # A leading "/word" reads as a command attempt; absolute paths and other
+    # slash-containing prompts fall through to the agent.
+    return bool(re.fullmatch(r"/[A-Za-z][A-Za-z0-9_-]*", command))
 
 
 def render_agent_message(turn: SummaryTurn, *, pending: bool = False) -> object:
@@ -730,6 +821,80 @@ def render_agent_message(turn: SummaryTurn, *, pending: bool = False) -> object:
 
 def render_agent_response(turn: SummaryTurn, *, pending: bool = False) -> Padding:
     return Padding(render_agent_message(turn, pending=pending), (0, 0, 0, 2))
+
+
+def render_turn_footer(result: FractalResult) -> Text:
+    if result.trace is not None and result.trace.status == "max_iterations":
+        footer = Text("! max iterations", style="yellow")
+    else:
+        footer = Text("✓ complete")
+    usage = turn_usage_from_trace(result.trace)
+    if usage is None:
+        return footer
+    parts: list[str] = []
+    if usage.iterations:
+        unit = "iteration" if usage.iterations == 1 else "iterations"
+        parts.append(f"{usage.iterations} {unit}")
+    if usage.duration_ms:
+        parts.append(_format_duration(usage.duration_ms))
+    if usage.input_tokens or usage.output_tokens:
+        parts.append(
+            f"{_format_tokens(usage.input_tokens)} in / "
+            f"{_format_tokens(usage.output_tokens)} out"
+        )
+    if usage.context_tokens:
+        parts.append(f"{_format_tokens(usage.context_tokens)} ctx")
+    if usage.cost:
+        parts.append(f"${usage.cost:.4f}")
+    for part in parts:
+        footer.append(" · ", style="dim")
+        footer.append(part, style="dim")
+    return footer
+
+
+def render_changed_files(changed_files: list[str]) -> Text:
+    text = Text("  changed: ", style="dim")
+    text.append(", ".join(changed_files), style="yellow")
+    return text
+
+
+def render_usage_report(totals: TurnUsage) -> Group:
+    if not (totals.input_tokens or totals.output_tokens or totals.iterations):
+        return Group(Text("No recorded usage for this session yet.", style="dim"))
+    table = Table.grid(padding=(0, 2))
+    table.add_column(no_wrap=True)
+    table.add_column(justify="right")
+    table.add_row(Text("input tokens", style="dim"), Text(f"{totals.input_tokens:,}"))
+    table.add_row(Text("output tokens", style="dim"), Text(f"{totals.output_tokens:,}"))
+    if totals.context_tokens:
+        table.add_row(
+            Text("current context", style="dim"),
+            Text(f"~{totals.context_tokens:,} tokens"),
+        )
+    table.add_row(Text("iterations", style="dim"), Text(f"{totals.iterations:,}"))
+    table.add_row(
+        Text("agent time", style="dim"), Text(_format_duration(totals.duration_ms))
+    )
+    table.add_row(Text("cost", style="dim"), Text(f"${totals.cost:.4f}"))
+    return Group(table)
+
+
+def _format_tokens(count: int) -> str:
+    if count >= 1_000_000:
+        return f"{count / 1_000_000:.1f}M"
+    if count >= 1_000:
+        return f"{count / 1_000:.1f}k"
+    return str(count)
+
+
+def _format_duration(duration_ms: int) -> str:
+    if duration_ms < 1_000:
+        return f"{duration_ms}ms"
+    seconds = duration_ms / 1_000
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes = int(seconds // 60)
+    return f"{minutes}m {seconds - minutes * 60:.0f}s"
 
 
 def _line_count(text: str) -> int:

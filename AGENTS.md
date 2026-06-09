@@ -16,11 +16,15 @@ blocks run.
 - Smoke tests: `tests/test_smoke.py`.
 - Session tests: `tests/test_session.py`.
 
-The current implementation stores structured session summaries and bounded
-PredictRLM history under `.fractal/sessions/<session_id>.json`. Fractal starts a
-fresh random session ID today; explicit resume-by-ID selection is still roadmap
-work. The Linear roadmap tracks the remaining work needed to turn this into a
-reliable daily-use coding agent.
+The current implementation stores structured session summaries, bounded
+PredictRLM history, and host-recorded per-turn usage (tokens, cost, duration,
+iterations, live context size) under `.fractal/sessions/<session_id>.json`.
+Sessions resume via `--resume <id>` or `/resume`; `/sessions` lists stored
+sessions and `/usage` reports session totals. The Linear roadmap tracks the
+remaining work needed to turn this into a reliable daily-use coding agent.
+
+Observed predict-rlm issues are recorded in `docs/predict-rlm-notes.md`
+instead of being worked around or fixed here.
 
 ## Local Commands
 
@@ -100,7 +104,6 @@ detection, branch/worktree awareness, and optional commit generation.
 
 - There is no host command execution tool yet.
 - There is no robust approval/sandbox policy yet.
-- There is no explicit resume-by-ID CLI flow yet.
 - Changed files are currently coerced from model output.
 - There is no git checkpoint, diff review, or rollback layer yet.
 - There is no MCP/plugin system beyond the planned standard skill loader.

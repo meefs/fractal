@@ -49,6 +49,11 @@ class FakeRuntime:
     def session_id(self) -> str:
         return self.session.session_id
 
+    def new_session(self) -> None:
+        from fractal.session import FractalSession
+
+        self.session = FractalSession()
+
     def resume(self, session_id: str) -> None:
         from fractal.session import FractalSession
         from fractal.session import session_path
@@ -1052,8 +1057,8 @@ def test_terminal_tui_verbose_command_toggles_session_verbosity(tmp_path: Path) 
 
     assert runtime.submitted == []
     text = output.getvalue()
-    assert "verbose on" in text
-    assert "verbose off" in text
+    assert "verbose iteration output on" in text
+    assert "verbose iteration output off" in text
     assert "usage: /verbose [on|off]" in text
 
 
@@ -1118,3 +1123,209 @@ api_key_env = "OPENAI_API_KEY"
     assert "Sub-model updated for this session." in normalized_output(
         output.getvalue()
     )
+
+
+def _usage_trace() -> object:
+    from predict_rlm.trace import (
+        IterationStep,
+        IterationUsage,
+        LMUsage,
+        RunTrace,
+        TokenUsage,
+    )
+
+    return RunTrace(
+        status="completed",
+        model="test-model",
+        iterations=2,
+        max_iterations=3,
+        duration_ms=12_400,
+        usage=LMUsage(
+            main=TokenUsage(input_tokens=8200, output_tokens=400, cost=0.0413),
+        ),
+        steps=[
+            IterationStep(
+                iteration=1,
+                reasoning="r",
+                code="x = 1",
+                output="ok",
+                untruncated_output="ok",
+                duration_ms=10,
+                usage=IterationUsage(
+                    main_lm={"prompt_tokens": 7421, "completion_tokens": 141}
+                ),
+            ),
+        ],
+    )
+
+
+def test_turn_footer_includes_usage_and_context() -> None:
+    from fractal.agent.schema import FractalResult
+    from fractal.tui.app import render_turn_footer
+
+    footer = render_turn_footer(
+        FractalResult(response="done", trace=_usage_trace())
+    ).plain
+
+    assert "✓ complete" in footer
+    assert "2 iterations" in footer
+    assert "12.4s" in footer
+    assert "8.2k in / 400 out" in footer
+    assert "7.4k ctx" in footer
+    assert "$0.0413" in footer
+
+
+def test_turn_footer_without_trace_is_plain_complete() -> None:
+    from fractal.agent.schema import FractalResult
+    from fractal.tui.app import render_turn_footer
+
+    footer = render_turn_footer(FractalResult(response="done")).plain
+
+    assert footer == "✓ complete"
+
+
+def test_terminal_tui_help_command_lists_commands(tmp_path: Path) -> None:
+    from fractal.tui import TerminalFractalApp
+
+    runtime = FakeRuntime(tmp_path)
+    console, output = capture_console()
+    app = TerminalFractalApp(
+        runtime,
+        console=console,
+        input_stream=StringIO("/help\n/exit\n"),
+    )
+
+    asyncio.run(app.run())
+
+    text = output.getvalue()
+    assert runtime.submitted == []
+    assert "/resume" in text
+    assert "/sessions" in text
+    assert "/usage" in text
+
+
+def test_terminal_tui_unknown_command_is_not_submitted(tmp_path: Path) -> None:
+    from fractal.tui import TerminalFractalApp
+
+    runtime = FakeRuntime(tmp_path)
+    console, output = capture_console()
+    app = TerminalFractalApp(
+        runtime,
+        console=console,
+        input_stream=StringIO("/bogus\n/exit\n"),
+    )
+
+    asyncio.run(app.run())
+
+    text = output.getvalue()
+    assert runtime.submitted == []
+    assert "unknown command: /bogus" in text
+
+
+def test_terminal_tui_path_prompt_is_submitted(tmp_path: Path) -> None:
+    from fractal.tui import TerminalFractalApp
+
+    runtime = FakeRuntime(tmp_path)
+    console, _ = capture_console()
+    app = TerminalFractalApp(
+        runtime,
+        console=console,
+        input_stream=StringIO("/tmp/thing.py explain this\n/exit\n"),
+    )
+
+    asyncio.run(app.run())
+
+    assert runtime.submitted == ["/tmp/thing.py explain this"]
+
+
+def test_terminal_tui_new_command_starts_fresh_session(tmp_path: Path) -> None:
+    from fractal.tui import TerminalFractalApp
+
+    runtime = FakeRuntime(tmp_path)
+    old_session_id = runtime.session_id
+    console, output = capture_console()
+    app = TerminalFractalApp(
+        runtime,
+        console=console,
+        input_stream=StringIO("/new\n/exit\n"),
+    )
+
+    asyncio.run(app.run())
+
+    text = output.getvalue()
+    assert runtime.submitted == []
+    assert runtime.session_id != old_session_id
+    assert "started new session" in text
+
+
+def test_terminal_tui_usage_command_reports_totals(tmp_path: Path) -> None:
+    from fractal.session import TurnUsage
+    from fractal.tui import TerminalFractalApp
+
+    runtime = FakeRuntime(tmp_path)
+    turn_id = runtime.session.add_user_message("fix")
+    runtime.session.add_agent_turn(status="succeeded", response="ok", turn_id=turn_id)
+    last_turn = runtime.session.turns[-1]
+    assert last_turn.agent is not None
+    last_turn.agent.usage = TurnUsage(
+        input_tokens=8200,
+        output_tokens=400,
+        cost=0.0413,
+        duration_ms=12_400,
+        iterations=2,
+        context_tokens=7421,
+    )
+    console, output = capture_console()
+    app = TerminalFractalApp(
+        runtime,
+        console=console,
+        input_stream=StringIO("/usage\n/exit\n"),
+    )
+
+    asyncio.run(app.run())
+
+    text = normalized_output(output.getvalue())
+    assert "input tokens 8,200" in text
+    assert "output tokens 400" in text
+    assert "~7,421 tokens" in text
+    assert "$0.0413" in text
+
+
+def test_terminal_tui_sessions_command_lists_stored_sessions(tmp_path: Path) -> None:
+    from fractal.session import FractalSession
+    from fractal.tui import TerminalFractalApp
+
+    stored = FractalSession()
+    stored.add_user_message("add a login page")
+    stored.save(tmp_path)
+    runtime = FakeRuntime(tmp_path)
+    console, output = capture_console()
+    app = TerminalFractalApp(
+        runtime,
+        console=console,
+        input_stream=StringIO("/sessions\n/exit\n"),
+    )
+
+    asyncio.run(app.run())
+
+    text = normalized_output(output.getvalue())
+    assert stored.session_id in text
+    assert "add a login page" in text
+
+
+def test_terminal_tui_verbose_command_toggles(tmp_path: Path) -> None:
+    from fractal.tui import TerminalFractalApp
+
+    runtime = FakeRuntime(tmp_path)
+    console, output = capture_console()
+    app = TerminalFractalApp(
+        runtime,
+        console=console,
+        input_stream=StringIO("/verbose\n/verbose\n/exit\n"),
+    )
+
+    asyncio.run(app.run())
+
+    text = output.getvalue()
+    assert "verbose iteration output on" in text
+    assert "verbose iteration output off" in text

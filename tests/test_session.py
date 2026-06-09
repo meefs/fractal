@@ -284,3 +284,126 @@ def test_session_id_cannot_address_paths(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="Invalid Fractal session id"):
         session_path(tmp_path, "../outside")
+
+
+def test_turn_usage_from_trace_records_tokens_and_context() -> None:
+    from predict_rlm.trace import (
+        IterationStep,
+        IterationUsage,
+        LMUsage,
+        RunTrace,
+        TokenUsage,
+    )
+
+    from fractal.session import turn_usage_from_trace
+
+    trace = RunTrace(
+        status="completed",
+        model="test-model",
+        iterations=2,
+        max_iterations=5,
+        duration_ms=1234,
+        usage=LMUsage(
+            main=TokenUsage(input_tokens=7000, output_tokens=300, cost=0.04),
+            sub=TokenUsage(input_tokens=1200, output_tokens=100, cost=0.01),
+        ),
+        steps=[
+            IterationStep(
+                iteration=1,
+                reasoning="r",
+                code="x",
+                output="o",
+                untruncated_output="o",
+                duration_ms=10,
+                usage=IterationUsage(main_lm={"prompt_tokens": 3000}),
+            ),
+            IterationStep(
+                iteration=2,
+                reasoning="r",
+                code="x",
+                output="o",
+                untruncated_output="o",
+                duration_ms=10,
+                usage=IterationUsage(main_lm={"prompt_tokens": 4100}),
+            ),
+        ],
+    )
+
+    usage = turn_usage_from_trace(trace)
+
+    assert usage is not None
+    assert usage.input_tokens == 8200
+    assert usage.output_tokens == 400
+    assert usage.cost == pytest.approx(0.05)
+    assert usage.duration_ms == 1234
+    assert usage.iterations == 2
+    assert usage.context_tokens == 4100
+
+
+def test_turn_usage_from_trace_handles_missing_trace() -> None:
+    from fractal.session import turn_usage_from_trace
+
+    assert turn_usage_from_trace(None) is None
+
+
+def test_usage_totals_aggregates_across_turns(tmp_path: Path) -> None:
+    from fractal.session import FractalSession, TurnUsage
+
+    session = FractalSession()
+    for context in (3000, 4100):
+        turn_id = session.add_user_message("do it")
+        session.add_agent_turn(status="succeeded", response="ok", turn_id=turn_id)
+        turn = session.turns[-1]
+        assert turn.agent is not None
+        turn.agent.usage = TurnUsage(
+            input_tokens=1000,
+            output_tokens=100,
+            cost=0.01,
+            duration_ms=500,
+            iterations=2,
+            context_tokens=context,
+        )
+    session.save(tmp_path)
+    reloaded = FractalSession.load(tmp_path, session_id=session.session_id)
+
+    totals = reloaded.usage_totals()
+
+    assert totals.input_tokens == 2000
+    assert totals.output_tokens == 200
+    assert totals.cost == pytest.approx(0.02)
+    assert totals.duration_ms == 1000
+    assert totals.iterations == 4
+    assert totals.context_tokens == 4100
+
+
+def test_list_sessions_orders_and_skips_invalid(tmp_path: Path) -> None:
+    import os
+
+    from fractal.session import FractalSession, list_sessions, sessions_dir_path
+
+    older = FractalSession()
+    older.add_user_message("first request")
+    older.save(tmp_path)
+    newer = FractalSession()
+    newer.add_user_message("second request")
+    newer.save(tmp_path)
+    older_path = sessions_dir_path(tmp_path) / f"{older.session_id}.json"
+    newer_path = sessions_dir_path(tmp_path) / f"{newer.session_id}.json"
+    os.utime(older_path, (1_000_000, 1_000_000))
+    os.utime(newer_path, (2_000_000, 2_000_000))
+    (sessions_dir_path(tmp_path) / "garbage.json").write_text("not json")
+
+    sessions = list_sessions(tmp_path)
+
+    assert [info.session_id for info in sessions] == [
+        newer.session_id,
+        older.session_id,
+    ]
+    assert sessions[0].first_message == "second request"
+    assert sessions[0].turn_count == 1
+
+
+def test_list_sessions_empty_workspace(tmp_path: Path) -> None:
+    from fractal.session import list_sessions
+
+    assert list_sessions(tmp_path) == []

@@ -53,6 +53,8 @@ class FractalRuntime:
         agent: FractalAgentLike,
         provider_selection: ProviderSelection | None = None,
         sub_lm_follows_main: bool = True,
+        lm: str | None = None,
+        sub_lm: str | None = None,
     ) -> None:
         self.workspace_path = Path(workspace_path).resolve()
         self.included_paths = [Path(path).resolve() for path in included_paths or []]
@@ -60,6 +62,8 @@ class FractalRuntime:
         self.agent = agent
         self.provider_selection = provider_selection
         self.sub_lm_follows_main = sub_lm_follows_main
+        self.lm = lm
+        self.sub_lm = sub_lm
 
     @classmethod
     def create(
@@ -91,6 +95,8 @@ class FractalRuntime:
                 debug=debug,
                 interpreter=create_sbx_interpreter(workspace, included_paths),
             ),
+            lm=lm,
+            sub_lm=sub_lm,
         )
         if session_id is not None:
             runtime.resume(session_id)
@@ -100,6 +106,9 @@ class FractalRuntime:
         if not session_path(self.workspace_path, session_id).exists():
             raise FileNotFoundError(f"No Fractal session found for id {session_id!r}.")
         self.session = FractalSession.load(self.workspace_path, session_id=session_id)
+
+    def new_session(self) -> None:
+        self.session = FractalSession()
 
     @property
     def session_id(self) -> str:
@@ -125,15 +134,19 @@ class FractalRuntime:
         previous_lm = getattr(self.agent, "lm", None)
         lm = build_lm(selection)
         setattr(self.agent, "lm", lm)
+        self.lm = lm
         if self.sub_lm_follows_main or getattr(self.agent, "sub_lm", None) is previous_lm:
             setattr(self.agent, "sub_lm", lm)
+            self.sub_lm = lm
         self.provider_selection = selection
 
     def apply_sub_model_selection(self, selection: ProviderSelection) -> None:
         from .providers import build_lm, check_provider_readiness
 
         check_provider_readiness(selection)
-        setattr(self.agent, "sub_lm", build_lm(selection))
+        sub_lm = build_lm(selection)
+        setattr(self.agent, "sub_lm", sub_lm)
+        self.sub_lm = sub_lm
         self.sub_lm_follows_main = False
 
     @property
