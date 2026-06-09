@@ -21,6 +21,7 @@ class RuntimeLMConfig:
 class RuntimeLMArgs(Protocol):
     lm: RuntimeLM | None
     sub_lm: RuntimeLM | None
+    workspace: Path | None
 
 
 def resolve_runtime_lms(
@@ -31,7 +32,7 @@ def resolve_runtime_lms(
     stderr: TextIO,
     auto_setup: bool,
 ) -> RuntimeLMConfig | None:
-    from .config import FractalConfigError, load_config
+    from .config import FractalConfigError, load_layered_config
     from .providers import ProviderError, build_lm
 
     if args.lm is not None:
@@ -42,8 +43,9 @@ def resolve_runtime_lms(
             sub_lm_follows_main=args.sub_lm is None,
         )
 
+    workspace = getattr(args, "workspace", None)
     try:
-        result = load_config()
+        result = load_layered_config(workspace=workspace)
     except FractalConfigError as exc:
         print(f"fractal config: {exc}", file=stderr)
         print("Run `fractal config setup` after fixing the config.", file=stderr)
@@ -60,7 +62,7 @@ def resolve_runtime_lms(
         if config_setup(stdin=stdin, stdout=stdout, stderr=stderr) != 0:
             return None
         try:
-            result = load_config()
+            result = load_layered_config(workspace=workspace)
         except FractalConfigError as exc:
             print(f"fractal config: {exc}", file=stderr)
             return None

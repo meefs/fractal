@@ -4,6 +4,7 @@ import os
 import re
 import tempfile
 import tomllib
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -14,6 +15,12 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 CONFIG_SCHEMA_VERSION = 1
 CONFIG_DIR_NAME = "fractal"
 CONFIG_FILE_NAME = "config.toml"
+PROJECT_CONFIG_DIR_NAME = ".fractal"
+ENV_PROVIDER = "FRACTAL_PROVIDER"
+ENV_MODEL = "FRACTAL_MODEL"
+ENV_SUB_MODEL = "FRACTAL_SUB_MODEL"
+ENV_MAX_ITERATIONS = "FRACTAL_MAX_ITERATIONS"
+ENV_VERBOSE = "FRACTAL_VERBOSE"
 REDACTED = "<redacted>"
 _ENV_VAR_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _PROVIDER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
@@ -116,6 +123,25 @@ class FractalConfig(BaseModel):
         return self
 
 
+class ProjectFractalConfig(BaseModel):
+    """Optional per-workspace overrides loaded from .fractal/config.toml."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = CONFIG_SCHEMA_VERSION
+    active_provider: str | None = Field(default=None, min_length=1)
+    active_model: str | None = Field(default=None, min_length=1)
+    active_sub_model: str | None = Field(default=None, min_length=1)
+    providers: dict[str, ProviderConfig] = Field(default_factory=dict)
+    defaults: DefaultsConfig = Field(default_factory=DefaultsConfig)
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_raw_secret_fields(cls, value: object) -> object:
+        _reject_raw_secret_fields(value)
+        return value
+
+
 class EffectiveFractalConfig(BaseModel):
     """Resolved config object consumed by future runtime and onboarding code."""
 
@@ -174,6 +200,139 @@ def load_config(path: str | Path | None = None) -> ConfigLoadResult:
     except (ValidationError, ValueError) as exc:
         raise FractalConfigSchemaError(config_path, str(exc)) from exc
     return ConfigLoadResult(path=config_path, config=config)
+
+
+@dataclass(frozen=True)
+class LayeredConfigResult:
+    """Global config merged with project-file and environment overrides."""
+
+    path: Path
+    config: FractalConfig | None
+    project_path: Path | None = None
+    env_overrides: tuple[str, ...] = ()
+
+    @property
+    def missing(self) -> bool:
+        return self.config is None
+
+    @property
+    def loaded(self) -> bool:
+        return self.config is not None
+
+
+def project_config_path(workspace: str | Path) -> Path:
+    return Path(workspace) / PROJECT_CONFIG_DIR_NAME / CONFIG_FILE_NAME
+
+
+def load_project_config(workspace: str | Path) -> ProjectFractalConfig | None:
+    config_path = project_config_path(workspace)
+    if not config_path.exists():
+        return None
+    try:
+        raw_text = config_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise FractalConfigError(config_path, f"could not read config: {exc}") from exc
+    try:
+        data = tomllib.loads(raw_text)
+    except tomllib.TOMLDecodeError as exc:
+        raise FractalConfigParseError(config_path, str(exc)) from exc
+    try:
+        return ProjectFractalConfig.model_validate(data)
+    except (ValidationError, ValueError) as exc:
+        raise FractalConfigSchemaError(config_path, str(exc)) from exc
+
+
+def load_layered_config(
+    *,
+    path: str | Path | None = None,
+    workspace: str | Path | None = None,
+    env: Mapping[str, str] | None = None,
+) -> LayeredConfigResult:
+    """Resolve config precedence: global file < project file < FRACTAL_* env.
+
+    CLI flags sit above all of these but are applied by the CLI itself.
+    Environment overrides only apply when some config file exists; with no
+    files at all the result is "not configured" so onboarding still runs.
+    """
+    environment = os.environ if env is None else env
+    global_result = load_config(path)
+    project_config = load_project_config(workspace) if workspace is not None else None
+
+    if global_result.config is None and project_config is None:
+        return LayeredConfigResult(path=global_result.path, config=None)
+
+    if global_result.config is not None:
+        data = global_result.config.model_dump(mode="python", exclude_none=True)
+    else:
+        data = {"schema_version": CONFIG_SCHEMA_VERSION, "providers": {}}
+
+    if project_config is not None:
+        overlay = project_config.model_dump(mode="python", exclude_none=True)
+        for key in ("active_provider", "active_model", "active_sub_model"):
+            if key in overlay:
+                data[key] = overlay[key]
+        for provider_id, provider_data in overlay.get("providers", {}).items():
+            data.setdefault("providers", {})[provider_id] = provider_data
+        for key, value in overlay.get("defaults", {}).items():
+            data.setdefault("defaults", {})[key] = value
+
+    env_overrides: list[str] = []
+    error_path = (
+        project_config_path(workspace)
+        if project_config is not None and workspace is not None
+        else global_result.path
+    )
+    for env_name, key in (
+        (ENV_PROVIDER, "active_provider"),
+        (ENV_MODEL, "active_model"),
+        (ENV_SUB_MODEL, "active_sub_model"),
+    ):
+        value = environment.get(env_name)
+        if value:
+            data[key] = value
+            env_overrides.append(env_name)
+    max_iterations = environment.get(ENV_MAX_ITERATIONS)
+    if max_iterations:
+        try:
+            data.setdefault("defaults", {})["max_iterations"] = int(max_iterations)
+        except ValueError as exc:
+            raise FractalConfigSchemaError(
+                error_path, f"{ENV_MAX_ITERATIONS} must be an integer"
+            ) from exc
+        env_overrides.append(ENV_MAX_ITERATIONS)
+    verbose = environment.get(ENV_VERBOSE)
+    if verbose:
+        data.setdefault("defaults", {})["verbose"] = _parse_env_bool(
+            verbose, name=ENV_VERBOSE, path=error_path
+        )
+        env_overrides.append(ENV_VERBOSE)
+
+    try:
+        merged = FractalConfig.model_validate(data)
+    except (ValidationError, ValueError) as exc:
+        raise FractalConfigSchemaError(
+            error_path,
+            f"invalid config after merging global/project/env layers: {exc}",
+        ) from exc
+    return LayeredConfigResult(
+        path=global_result.path,
+        config=merged,
+        project_path=(
+            project_config_path(workspace)
+            if project_config is not None and workspace is not None
+            else None
+        ),
+        env_overrides=tuple(env_overrides),
+    )
+
+
+def _parse_env_bool(value: str, *, name: str, path: Path) -> bool:
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise FractalConfigSchemaError(path, f"{name} must be a boolean (true/false)")
 
 
 def resolve_effective_config(

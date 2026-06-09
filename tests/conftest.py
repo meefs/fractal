@@ -4,6 +4,18 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _clear_fractal_env_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in (
+        "FRACTAL_PROVIDER",
+        "FRACTAL_MODEL",
+        "FRACTAL_SUB_MODEL",
+        "FRACTAL_MAX_ITERATIONS",
+        "FRACTAL_VERBOSE",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _stub_provider_connectivity(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep tests offline: pretend every connectivity probe answered HTTP 200.
 

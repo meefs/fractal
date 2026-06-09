@@ -19,21 +19,32 @@ def run_config_command(
     stderr = stderr or sys.stderr
 
     offline = bool(getattr(args, "offline", False))
+    workspace = getattr(args, "workspace", None)
     if args.config_command == "show":
-        return config_show(stdout=stdout, stderr=stderr)
+        return config_show(stdout=stdout, stderr=stderr, workspace=workspace)
     if args.config_command == "status":
-        return config_status(stdout=stdout, stderr=stderr, offline=offline)
+        return config_status(
+            stdout=stdout,
+            stderr=stderr,
+            offline=offline,
+            workspace=workspace,
+        )
     if args.config_command == "setup":
         return config_setup(stdin=stdin, stdout=stdout, stderr=stderr, offline=offline)
     print(f"fractal config: unknown command {args.config_command!r}", file=stderr)
     return 1
 
 
-def config_show(*, stdout: TextIO, stderr: TextIO) -> int:
-    from .config import FractalConfigError, load_config, render_config
+def config_show(
+    *,
+    stdout: TextIO,
+    stderr: TextIO,
+    workspace: Any | None = None,
+) -> int:
+    from .config import FractalConfigError, load_layered_config, render_config
 
     try:
-        result = load_config()
+        result = load_layered_config(workspace=workspace)
     except FractalConfigError as exc:
         print(f"fractal config: {exc}", file=stderr)
         return 1
@@ -42,16 +53,30 @@ def config_show(*, stdout: TextIO, stderr: TextIO) -> int:
         print("Run `fractal config setup`.", file=stderr)
         return 1
     print(render_config(result.config, path=result.path), file=stdout)
+    _print_layer_notes(result, stdout=stdout)
     return 0
 
 
-def config_status(*, stdout: TextIO, stderr: TextIO, offline: bool = False) -> int:
-    from .config import FractalConfigError, load_config, render_config
+def _print_layer_notes(result: Any, *, stdout: TextIO) -> None:
+    if result.project_path is not None:
+        print(f"project overrides: {result.project_path}", file=stdout)
+    if result.env_overrides:
+        print("env overrides: " + ", ".join(result.env_overrides), file=stdout)
+
+
+def config_status(
+    *,
+    stdout: TextIO,
+    stderr: TextIO,
+    offline: bool = False,
+    workspace: Any | None = None,
+) -> int:
+    from .config import FractalConfigError, load_layered_config, render_config
     from .connectivity import ProviderConnectivityError, check_provider_connectivity
     from .providers import ProviderError, check_provider_readiness
 
     try:
-        result = load_config()
+        result = load_layered_config(workspace=workspace)
     except FractalConfigError as exc:
         print("Fractal config status: invalid", file=stdout)
         print(f"fractal config: {exc}", file=stderr)
@@ -97,6 +122,7 @@ def config_status(*, stdout: TextIO, stderr: TextIO, offline: bool = False) -> i
 
     print("Fractal config status: ok", file=stdout)
     print(render_config(result.config, path=result.path), file=stdout)
+    _print_layer_notes(result, stdout=stdout)
     print(connectivity_note, file=stdout)
     return 0
 

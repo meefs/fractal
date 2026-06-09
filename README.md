@@ -76,6 +76,15 @@ or revoked key is caught immediately instead of on the first agent turn. Pass
 `--offline` to skip the live check; network failures during setup only warn
 and never discard a finished setup.
 
+Config is resolved in layers: the global file, then per-workspace overrides in
+`<workspace>/.fractal/config.toml` (same schema, every field optional), then
+`FRACTAL_PROVIDER` / `FRACTAL_MODEL` / `FRACTAL_SUB_MODEL` /
+`FRACTAL_MAX_ITERATIONS` / `FRACTAL_VERBOSE` environment variables, with CLI
+flags on top. A repo can pin its model without touching anyone's global
+config, and CI can override via env. `fractal config show` lists which layers
+contributed. Environment overrides apply only once some config file exists,
+so first-run onboarding still triggers.
+
 Beyond the active provider and model, the config supports:
 
 ```toml
