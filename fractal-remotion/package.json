@@ -1,0 +1,34 @@
+{
+  "name": "fractal-remotion",
+  "version": "1.0.0",
+  "description": "Release video for Fractal, a Recursive Language Model coding agent",
+  "repository": {},
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "@remotion/cli": "4.0.474",
+    "@remotion/google-fonts": "^4.0.474",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "remotion": "4.0.474"
+  },
+  "devDependencies": {
+    "@remotion/eslint-config-flat": "4.0.474",
+    "@types/react": "19.2.7",
+    "@types/web": "0.0.166",
+    "eslint": "9.19.0",
+    "prettier": "3.8.1",
+    "typescript": "5.9.3"
+  },
+  "scripts": {
+    "dev": "remotion studio",
+    "render": "remotion render FractalRelease out/fractal-release.mp4",
+    "still": "remotion still FractalRelease out/fractal-release-frame.png --frame=180 --scale=0.5",
+    "build": "remotion bundle",
+    "upgrade": "remotion upgrade",
+    "lint": "eslint src && tsc"
+  },
+  "sideEffects": [
+    "*.css"
+  ]
+}
