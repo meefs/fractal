@@ -176,6 +176,8 @@ def test_run_non_interactive_prints_response_and_status(
         "extra context"
         "\n</Fractal stdin context>"
     )
+    assert "______              _        _" in stderr.getvalue()
+    assert "|_|  |_|  \\__,_|\\___|\\__\\__,_|_|" in stderr.getvalue()
     assert "fractal: session session-123" in stderr.getvalue()
     assert "fractal: opening README.md" in stderr.getvalue()
     assert "fractal: changed files README.md" in stderr.getvalue()
@@ -226,7 +228,15 @@ def test_run_non_interactive_verbose_prints_iteration_trace_to_stderr(
 
     monkeypatch.setattr(FractalRuntime, "create", fake_create)
     args = cli.build_parser().parse_args(
-        ["--workspace", str(tmp_path), "--verbose", "-p", "update docs"]
+        [
+            "--workspace",
+            str(tmp_path),
+            "--lm",
+            "test-lm",
+            "--verbose",
+            "-p",
+            "update docs",
+        ]
     )
     stdout = StringIO()
     stderr = StringIO()
@@ -280,7 +290,16 @@ def test_run_non_interactive_quiet_suppresses_verbose_iteration_trace(
         lambda **kwargs: FakeRuntime(),
     )
     args = cli.build_parser().parse_args(
-        ["--workspace", str(tmp_path), "--quiet", "--verbose", "-p", "update docs"]
+        [
+            "--workspace",
+            str(tmp_path),
+            "--lm",
+            "test-lm",
+            "--quiet",
+            "--verbose",
+            "-p",
+            "update docs",
+        ]
     )
     stdout = StringIO()
     stderr = StringIO()
@@ -427,8 +446,9 @@ def test_run_tui_shows_shutdown_status_and_closes_runtime(
             *,
             console: FakeConsole,
             verbose_iterations: bool,
+            banner: str | None = None,
         ) -> None:
-            events.append(f"app:{verbose_iterations}")
+            events.append(f"app:{verbose_iterations}:banner={banner is not None}")
 
         async def run(self) -> None:
             events.append("run")
@@ -457,7 +477,7 @@ def test_run_tui_shows_shutdown_status_and_closes_runtime(
         "status_enter",
         "prewarm",
         "status_exit",
-        "app:True",
+        "app:True:banner=True",
         "run",
         "status:[dim]shutting down sandbox... press Ctrl-C again to force exit without cleaning up the sandbox[/dim]:dots",
         "status_enter",
@@ -513,6 +533,7 @@ def test_run_tui_allows_force_exit_during_shutdown(
             *,
             console: FakeConsole,
             verbose_iterations: bool,
+            banner: str | None = None,
         ) -> None:
             events.append("app")
 

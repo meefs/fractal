@@ -15,6 +15,21 @@ MAX_ITERATIONS_EXIT_CODE = 2
 DEFAULT_MAX_ITERATIONS = 30
 
 
+FRACTAL_BANNER = r"""
+ ______              _        _
+|  ____|            | |      | |
+| |__ _ __ __ _  ___| |_ __ _| |
+|  __| '__/ _` |/ __| __/ _` | |
+| |  | | | (_| | (__| || (_| | |
+|_|  |_|  \__,_|\___|\__\__,_|_|
+""".strip("\n")
+
+
+def _print_startup_banner(output: TextIO) -> None:
+    print(FRACTAL_BANNER, file=output)
+    print(file=output)
+
+
 def _effective_max_iterations(args: argparse.Namespace, lm_config: Any) -> int:
     if args.max_iterations is not None:
         return args.max_iterations
@@ -194,6 +209,7 @@ def run_tui(args: argparse.Namespace) -> int:
                 runtime,
                 console=console,
                 verbose_iterations=display_verbose,
+                banner=FRACTAL_BANNER,
             ).run()
         )
     finally:
@@ -267,6 +283,7 @@ def run_non_interactive(
         return 1
 
     if not args.quiet:
+        _print_startup_banner(stderr)
         print(f"fractal: workspace {runtime.workspace_path}", file=stderr)
         print(f"fractal: session {runtime.session_id}", file=stderr)
         print("fractal: running RLM...", file=stderr)

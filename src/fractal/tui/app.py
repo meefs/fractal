@@ -207,6 +207,7 @@ class TerminalFractalApp:
         input_stream: TextIO | None = None,
         prompt_session: PromptSession[str] | None = None,
         verbose_iterations: bool = False,
+        banner: str | None = None,
         config_stdin: TextIO | None = None,
         config_stdout: TextIO | None = None,
         config_stderr: TextIO | None = None,
@@ -215,6 +216,7 @@ class TerminalFractalApp:
         self.console = console or Console()
         self.input_stream = input_stream
         self.verbose_iterations = verbose_iterations
+        self.banner = banner
         self.config_stdin = config_stdin or input_stream or sys.stdin
         self.config_stdout = config_stdout or getattr(self.console, "file", sys.stdout)
         self.config_stderr = config_stderr or getattr(self.console, "file", sys.stderr)
@@ -245,6 +247,9 @@ class TerminalFractalApp:
         try:
             if self.input_stream is None and self.console.is_terminal:
                 self._pad_to_bottom()
+            if self.banner:
+                self.console.print(Text(self.banner, style="bold cyan"))
+                self.console.print()
             self.render_header()
             self.render_new_turns()
 
@@ -289,8 +294,12 @@ class TerminalFractalApp:
         # prompt claims every row below the cursor (prompt_toolkit renders its
         # bottom toolbar at the end of that region), so leaving fewer rows
         # below the header means a smaller gap. Header (3) + the blank line
-        # printed before the prompt + input + footer = 6 rows.
-        pad = max(self.console.height - 6, 0)
+        # printed before the prompt + input + footer = 6 rows, plus the banner
+        # and its trailing blank line when one is set.
+        rows = 6
+        if self.banner:
+            rows += len(self.banner.splitlines()) + 1
+        pad = max(self.console.height - rows, 0)
         if pad:
             self.console.print("\n" * (pad - 1))
 
