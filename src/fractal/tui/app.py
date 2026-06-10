@@ -10,8 +10,12 @@ from typing import Protocol, TextIO
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.document import Document
+from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.layout.containers import HSplit, Window
+from prompt_toolkit.layout.dimension import Dimension
+from prompt_toolkit.layout.layout import Layout
 from prompt_toolkit.styles import Style
 from rich.console import Console, Group
 from rich.markdown import Markdown
@@ -41,6 +45,9 @@ PROMPT_STYLE = Style.from_dict(
     {
         "prompt": "bold #8b5cf6",
         "session": "ansibrightblack",
+        "bottom-toolbar": "noreverse",
+        "bottom-toolbar.label": "#6b7280",
+        "bottom-toolbar.value": "ansicyan",
     }
 )
 SLASH_COMMANDS = {
@@ -112,7 +119,47 @@ def slash_command_key_bindings() -> KeyBindings:
             return
         buffer.validate_and_handle()
 
+    @bindings.add("escape", "enter")
+    def _(event: object) -> None:
+        event.current_buffer.insert_text("\n")
+
+    @bindings.add("c-j")
+    def _(event: object) -> None:
+        event.current_buffer.insert_text("\n")
+
     return bindings
+
+
+def _prompt_continuation(width: int, line_number: int, is_soft_wrap: bool) -> str:
+    return "      … "
+
+
+class _FooterPromptSession(PromptSession[str]):
+    """PromptSession whose bottom toolbar hugs the input box.
+
+    prompt_toolkit claims every row between the cursor and the bottom of the
+    screen and renders the bottom toolbar on the region's last row, leaving a
+    blank gap whenever the prompt sits above the last screen row. A
+    high-weight filler window appended below the toolbar absorbs that extra
+    space instead, so the toolbar stays glued to the input.
+    """
+
+    def _create_layout(self) -> Layout:
+        layout = super()._create_layout()
+        container = layout.container
+        if isinstance(container, HSplit):
+            container.children.append(
+                Window(height=Dimension(preferred=0, weight=10_000))
+            )
+        return layout
+
+
+def _format_token_count(tokens: int) -> str:
+    if tokens < 1000:
+        return str(tokens)
+    if tokens < 1_000_000:
+        return f"{tokens / 1000:.1f}k"
+    return f"{tokens / 1_000_000:.2f}M"
 
 
 class SessionLike(Protocol):
@@ -171,11 +218,17 @@ class TerminalFractalApp:
         self.config_stdin = config_stdin or input_stream or sys.stdin
         self.config_stdout = config_stdout or getattr(self.console, "file", sys.stdout)
         self.config_stderr = config_stderr or getattr(self.console, "file", sys.stderr)
-        self.prompt_session = prompt_session or PromptSession(
+        self.prompt_session = prompt_session or _FooterPromptSession(
             style=PROMPT_STYLE,
             completer=SlashCommandCompleter(),
-            complete_while_typing=True,
+            # Only auto-complete (and reserve rows for the menu) while typing
+            # a slash command; otherwise the input box stays one row tall with
+            # the footer glued below it.
+            complete_while_typing=Condition(self._typing_slash_command),
             key_bindings=slash_command_key_bindings(),
+            multiline=True,
+            prompt_continuation=_prompt_continuation,
+            bottom_toolbar=self._render_bottom_toolbar,
         )
         self._rendered_turn_ids: set[str] = set()
         self._pending_turn_ids: set[str] = set()
@@ -190,6 +243,8 @@ class TerminalFractalApp:
         previous_sigint_handler = signal.getsignal(signal.SIGINT)
         signal.signal(signal.SIGINT, self._handle_sigint)
         try:
+            if self.input_stream is None and self.console.is_terminal:
+                self._pad_to_bottom()
             self.render_header()
             self.render_new_turns()
 
@@ -208,22 +263,36 @@ class TerminalFractalApp:
                     continue
 
                 self._sigint_mode = "turn"
-                result = await self.run_turn(message)
-                if result is None:
-                    continue
-                self.console.print(render_turn_footer(result))
-                if result.changed_files:
-                    self.console.print(render_changed_files(result.changed_files))
-                if result.trace is not None and self._last_turn_live_iteration_count == 0:
-                    self.console.print(
-                        render_trace_summary(
-                            result.trace,
-                            verbose=self.verbose_iterations,
-                        )
-                    )
-                self.render_new_turns()
+                await self._execute_turn(message)
         finally:
             signal.signal(signal.SIGINT, previous_sigint_handler)
+
+    async def _execute_turn(self, message: str) -> None:
+        result = await self.run_turn(message)
+        if result is None:
+            return
+        self.console.print(render_turn_footer(result))
+        if result.changed_files:
+            self.console.print(render_changed_files(result.changed_files))
+        if result.trace is not None and self._last_turn_live_iteration_count == 0:
+            self.console.print(
+                render_trace_summary(
+                    result.trace,
+                    verbose=self.verbose_iterations,
+                )
+            )
+        self.render_new_turns()
+
+    def _pad_to_bottom(self) -> None:
+        # Land the first prompt at the bottom of the screen so history flows
+        # upward and the input box sits directly on the status footer. The
+        # prompt claims every row below the cursor (prompt_toolkit renders its
+        # bottom toolbar at the end of that region), so leaving fewer rows
+        # below the header means a smaller gap. Header (3) + the blank line
+        # printed before the prompt + input + footer = 6 rows.
+        pad = max(self.console.height - 6, 0)
+        if pad:
+            self.console.print("\n" * (pad - 1))
 
     async def run_turn(self, message: str) -> FractalResult | None:
         def mark_pending() -> None:
@@ -298,6 +367,53 @@ class TerminalFractalApp:
         if task is not None and not task.done():
             task.cancel()
 
+    def _typing_slash_command(self) -> bool:
+        buffer = getattr(self.prompt_session, "default_buffer", None)
+        if buffer is None:
+            return False
+        return buffer.document.text.startswith("/")
+
+    def _render_bottom_toolbar(self) -> list[tuple[str, str]]:
+        try:
+            return self._bottom_toolbar_fragments()
+        except Exception:
+            return [("class:bottom-toolbar.label", " fractal")]
+
+    def _bottom_toolbar_fragments(self) -> list[tuple[str, str]]:
+        fragments: list[tuple[str, str]] = []
+        model_label = getattr(self.runtime, "model_label", None)
+        if model_label is None:
+            lm = getattr(self.runtime, "lm", None)
+            model_label = str(lm) if lm is not None else None
+        if model_label:
+            sub_label = getattr(self.runtime, "sub_model_label", None) or model_label
+            fragments.append(("class:bottom-toolbar.label", " model "))
+            fragments.append(("class:bottom-toolbar.value", str(model_label)))
+            fragments.append(("class:bottom-toolbar.label", " · sub "))
+            fragments.append(("class:bottom-toolbar.value", str(sub_label)))
+            fragments.append(("class:bottom-toolbar.label", " · verbose "))
+        else:
+            fragments.append(("class:bottom-toolbar.label", " verbose "))
+        fragments.append(
+            (
+                "class:bottom-toolbar.value",
+                "on" if self.verbose_iterations else "off",
+            )
+        )
+
+        totals = summarize_usage(self.runtime.session.summary_model)
+        tokens = totals.input_tokens + totals.output_tokens
+        if tokens:
+            fragments.append(("class:bottom-toolbar.label", " · "))
+            fragments.append(
+                ("class:bottom-toolbar.value", f"{_format_token_count(tokens)} tok")
+            )
+            if totals.cost:
+                fragments.append(
+                    ("class:bottom-toolbar.value", f" ${totals.cost:.2f}")
+                )
+        return fragments
+
     def _show_interrupting_status(self) -> None:
         status = self._active_status
         if status is None:
@@ -333,6 +449,7 @@ class TerminalFractalApp:
         if model_label is None:
             lm = getattr(self.runtime, "lm", None)
             model_label = str(lm) if lm is not None else None
+        verbose_state = "on" if self.verbose_iterations else "off"
         if model_label:
             sub_label = getattr(self.runtime, "sub_model_label", None) or model_label
             self.console.print(
@@ -341,9 +458,24 @@ class TerminalFractalApp:
                     (model_label, "dim cyan"),
                     (" | sub ", "dim"),
                     (str(sub_label), "dim cyan"),
+                    (" | verbose ", "dim"),
+                    (verbose_state, "dim cyan"),
                 )
             )
-        self.console.print(Text("Type /help for commands, /exit to quit.", style="dim"))
+        else:
+            self.console.print(
+                Text.assemble(
+                    ("verbose ", "dim"),
+                    (verbose_state, "dim cyan"),
+                )
+            )
+        self.console.print(
+            Text(
+                "Type /help for commands, /exit to quit. "
+                "Alt+Enter inserts a newline.",
+                style="dim",
+            )
+        )
 
     async def handle_slash_command(self, message: str) -> bool:
         command, _, rest = message.partition(" ")
