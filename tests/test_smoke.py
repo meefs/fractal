@@ -677,6 +677,51 @@ def test_signature_fields() -> None:
     assert "User: fix tests" in signature.instructions
 
 
+def test_signature_workspace_instructions() -> None:
+    if not workspace_available():
+        pytest.skip("predict_rlm.Workspace is not exported by the local branch yet")
+
+    from fractal.agent.signature import build_edit_workspace_signature
+
+    signature = build_edit_workspace_signature(
+        "User: fix tests",
+        workspace_instructions="Always run `make lint` before finishing.",
+    )
+    instructions = signature.instructions
+    assert "## Workspace instructions (AGENTS.md)" in instructions
+    assert "Always run `make lint` before finishing." in instructions
+    # Static AGENTS.md content must precede the dynamic per-turn summary so the
+    # prompt keeps a stable cacheable prefix.
+    assert instructions.index("## Workspace instructions (AGENTS.md)") < instructions.index(
+        "## Always-visible session summary"
+    )
+
+    without = build_edit_workspace_signature("User: fix tests")
+    assert "## Workspace instructions (AGENTS.md)" not in without.instructions
+
+
+def test_load_workspace_instructions(tmp_path) -> None:
+    if not workspace_available():
+        pytest.skip("predict_rlm.Workspace is not exported by the local branch yet")
+
+    from fractal.agent.service import (
+        _MAX_WORKSPACE_INSTRUCTIONS_CHARS,
+        load_workspace_instructions,
+    )
+
+    assert load_workspace_instructions(tmp_path) == ""
+
+    (tmp_path / "AGENTS.md").write_text("Use uv for everything.\n", encoding="utf-8")
+    assert load_workspace_instructions(tmp_path) == "Use uv for everything."
+
+    (tmp_path / "AGENTS.md").write_text(
+        "x" * (_MAX_WORKSPACE_INSTRUCTIONS_CHARS + 1), encoding="utf-8"
+    )
+    truncated = load_workspace_instructions(tmp_path)
+    assert truncated.endswith("[AGENTS.md truncated — read the full file from the workspace.]")
+    assert len(truncated) < _MAX_WORKSPACE_INSTRUCTIONS_CHARS + 200
+
+
 def test_service_construction() -> None:
     if not workspace_available():
         pytest.skip("predict_rlm.Workspace is not exported by the local branch yet")

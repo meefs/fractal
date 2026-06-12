@@ -22,6 +22,24 @@ class FractalInterpreter(PredictRLMInterpreter, Protocol):
     def prewarm(self) -> None: ...
 
 
+_MAX_WORKSPACE_INSTRUCTIONS_CHARS = 20_000
+
+
+def load_workspace_instructions(workspace_path: Path) -> str:
+    """Read AGENTS.md from the workspace root, if present."""
+    candidate = workspace_path / "AGENTS.md"
+    try:
+        text = candidate.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError):
+        return ""
+    if len(text) > _MAX_WORKSPACE_INSTRUCTIONS_CHARS:
+        text = (
+            text[:_MAX_WORKSPACE_INSTRUCTIONS_CHARS]
+            + "\n\n[AGENTS.md truncated — read the full file from the workspace.]"
+        )
+    return text
+
+
 class FractalAgent(dspy.Module):
     """Thin DSPy module wrapping Fractal's workspace-editing RLM."""
 
@@ -65,7 +83,10 @@ class FractalAgent(dspy.Module):
             for path in included_paths or []
         ]
 
-        signature = build_edit_workspace_signature(rendered_session_summary)
+        signature = build_edit_workspace_signature(
+            rendered_session_summary,
+            workspace_instructions=load_workspace_instructions(Path(workspace.path)),
+        )
         predictor_kwargs: dict[str, object] = {
             "lm": self.lm,
             "sub_lm": self.sub_lm,

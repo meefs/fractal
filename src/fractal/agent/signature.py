@@ -32,14 +32,29 @@ primary workspace when possible.
 
 def build_edit_workspace_signature(
     rendered_session_summary: str,
+    workspace_instructions: str = "",
 ) -> type[dspy.Signature]:
     """Build the per-turn Fractal coding-agent signature."""
+
+    # Static workspace instructions come before the dynamic session summary so
+    # the prompt keeps a stable cacheable prefix across turns.
+    workspace_section = ""
+    if workspace_instructions.strip():
+        workspace_section = f"""
+## Workspace instructions (AGENTS.md)
+
+The workspace contains an AGENTS.md file with project-specific guidance from
+the user. Follow it when working in this workspace; the current `user_message`
+takes precedence if they conflict.
+
+{workspace_instructions.strip()}
+"""
 
     # The summary must be visible before the RLM chooses to inspect variables,
     # so it is baked into the instructions for this specific turn.
     summary = rendered_session_summary.strip() or "No prior Fractal session context."
     instructions = f"""{BASE_EDIT_WORKSPACE_INSTRUCTIONS}
-
+{workspace_section}
 ## Always-visible session summary
 
 {summary}
