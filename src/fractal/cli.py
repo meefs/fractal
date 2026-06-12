@@ -18,6 +18,18 @@ DEFAULT_MAX_ITERATIONS = 30
 
 
 FRACTAL_BANNER = r"""
+
+               --
+              ----
+             ----
+            ----
+           ---- +++++
+          ----    ++++
+         ----      ++++
+          --        ++++
+      ++++++++++++++ ++++
+     +++++++++++++++  ++++
+
  ______              _        _
 |  ____|            | |      | |
 | |__ _ __ __ _  ___| |_ __ _| |
@@ -205,7 +217,7 @@ def run_tui(args: argparse.Namespace) -> int:
     console = Console()
 
     def show_setup_banner() -> None:
-        console.print(FRACTAL_BANNER, style="bold cyan")
+        console.print(FRACTAL_BANNER, style="bold #8b5cf6")
         console.print("")
 
     lm_config = resolve_runtime_lms(

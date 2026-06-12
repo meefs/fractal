@@ -248,7 +248,7 @@ class TerminalFractalApp:
             if self.input_stream is None and self.console.is_terminal:
                 self._pad_to_bottom()
             if self.banner:
-                self.console.print(Text(self.banner, style="bold cyan"))
+                self.console.print(Text(self.banner, style="bold #8b5cf6"))
                 self.console.print()
             self.render_header()
             self.render_new_turns()
