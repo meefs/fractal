@@ -11,7 +11,6 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-
 CONFIG_SCHEMA_VERSION = 1
 CONFIG_DIR_NAME = "fractal"
 CONFIG_FILE_NAME = "config.toml"

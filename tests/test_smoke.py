@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import asyncio
 from io import StringIO
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-
 
 pytest.importorskip(
     "predict_rlm",
@@ -168,8 +167,8 @@ def test_read_non_interactive_stdin_reads_pipe_with_data() -> None:
 def test_run_non_interactive_prints_response_and_status(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from fractal.agent.schema import FractalResult
     from fractal import cli
+    from fractal.agent.schema import FractalResult
     from fractal.runtime import FractalRuntime
 
     calls: dict[str, object] = {}
@@ -228,8 +227,8 @@ def test_run_non_interactive_prints_response_and_status(
 def test_run_non_interactive_closes_runtime_on_success_and_failure(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from fractal.agent.schema import FractalResult
     from fractal import cli
+    from fractal.agent.schema import FractalResult
     from fractal.runtime import FractalRuntime
 
     calls: dict[str, object] = {}
@@ -267,8 +266,8 @@ def test_run_non_interactive_verbose_prints_iteration_trace_to_stderr(
 ) -> None:
     from predict_rlm.trace import IterationStep
 
-    from fractal.agent.schema import FractalIterationEvent, FractalResult
     from fractal import cli
+    from fractal.agent.schema import FractalIterationEvent, FractalResult
     from fractal.runtime import FractalRuntime
 
     calls: dict[str, object] = {}
@@ -348,8 +347,8 @@ def test_run_non_interactive_verbose_prints_iteration_trace_to_stderr(
 def test_run_non_interactive_quiet_suppresses_verbose_iteration_trace(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from fractal.agent.schema import FractalResult
     from fractal import cli
+    from fractal.agent.schema import FractalResult
     from fractal.runtime import FractalRuntime
 
     calls: dict[str, object] = {}
@@ -401,8 +400,8 @@ def test_run_non_interactive_quiet_suppresses_verbose_iteration_trace(
 def test_run_non_interactive_reads_dash_prompt_from_stdin(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from fractal.agent.schema import FractalResult
     from fractal import cli
+    from fractal.agent.schema import FractalResult
     from fractal.runtime import FractalRuntime
 
     calls: dict[str, object] = {}
@@ -442,9 +441,11 @@ def test_run_non_interactive_returns_distinct_code_for_max_iterations(
 ) -> None:
     from predict_rlm import RunTrace
 
-    from fractal.agent.schema import FractalResult
     from fractal import cli
+    from fractal.agent.schema import FractalResult
     from fractal.runtime import FractalRuntime
+
+    calls: dict[str, object] = {}
 
     trace = RunTrace(
         status="max_iterations",
@@ -491,9 +492,10 @@ def test_run_tui_shows_shutdown_status_and_closes_runtime(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    import rich.console as rich_console
+
     import fractal.runtime as runtime_module
     import fractal.tui as tui_module
-    import rich.console as rich_console
     from fractal.cli import run_tui
 
     events: list[str] = []
@@ -577,9 +579,10 @@ def test_run_tui_allows_force_exit_during_shutdown(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    import rich.console as rich_console
+
     import fractal.runtime as runtime_module
     import fractal.tui as tui_module
-    import rich.console as rich_console
     from fractal.cli import run_tui
 
     events: list[str] = []

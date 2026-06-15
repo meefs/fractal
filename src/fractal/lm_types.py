@@ -4,5 +4,4 @@ from typing import TypeAlias
 
 import dspy
 
-
 RuntimeLM: TypeAlias = dspy.LM | str

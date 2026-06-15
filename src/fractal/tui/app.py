@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 import re
 import signal
 import sys
+from pathlib import Path
 from typing import Protocol, TextIO
 
+from predict_rlm import RunTrace
+from predict_rlm.trace import IterationStep
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.document import Document
@@ -37,9 +39,6 @@ from fractal.session import (
     summarize_usage,
     turn_usage_from_trace,
 )
-from predict_rlm import RunTrace
-from predict_rlm.trace import IterationStep
-
 
 PROMPT_STYLE = Style.from_dict(
     {

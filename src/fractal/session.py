@@ -8,9 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
 from predict_rlm import RunTrace
-
+from pydantic import BaseModel, Field
 
 SESSION_DIR = ".fractal"
 SESSIONS_DIR = "sessions"

@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from pathlib import Path
 import select
 import sys
+from pathlib import Path
 from typing import Any, TextIO
 
 from .config_commands import run_config_command
 from .runtime_lms import resolve_runtime_lms
-
 
 MAX_STDIN_BYTES = 10 * 1024 * 1024
 STDIN_CONTEXT_GRACE_SECONDS = 1.0

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from io import StringIO
-from pathlib import Path
 import sys
 import tomllib
+from io import StringIO
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pytest

@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-
 pytest.importorskip(
     "predict_rlm",
     reason="predict-rlm is required for Fractal runtime tests",
@@ -239,7 +238,7 @@ def test_runtime_submit_persists_interruption_before_reraising(tmp_path: Path) -
     from predict_rlm import RunTrace
 
     from fractal.runtime import FractalRuntime
-    from fractal.session import FractalSession, INTERRUPTED_ERROR
+    from fractal.session import INTERRUPTED_ERROR, FractalSession
 
     trace = RunTrace(
         status="error",
@@ -321,7 +320,7 @@ def test_runtime_reclassifies_interrupt_shutdown_error(tmp_path: Path) -> None:
     from predict_rlm import RunTrace
 
     from fractal.runtime import FractalRuntime
-    from fractal.session import FractalSession, INTERRUPTED_ERROR
+    from fractal.session import INTERRUPTED_ERROR, FractalSession
 
     trace = RunTrace(
         status="error",

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+
 def write_api_config(config_home: Path, *, api_key_env: str = "OPENAI_API_KEY") -> Path:
     path = config_home / "fractal" / "config.toml"
     path.parent.mkdir(parents=True, exist_ok=True)

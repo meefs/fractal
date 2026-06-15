@@ -4,7 +4,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, TextIO
 
-
 CUSTOM_MODEL_SENTINEL = "__custom_model__"
 SUB_MODEL_FOLLOWS_MAIN = "__follows_main__"
 SUB_PROVIDER_FOLLOWS_MAIN = "__follows_main_provider__"

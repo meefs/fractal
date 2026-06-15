@@ -12,7 +12,6 @@ from .config import (
     default_config_path,
 )
 
-
 CREDENTIALS_FILE_NAME = "credentials.toml"
 _KEYS_TABLE = "api_keys"
 

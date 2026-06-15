@@ -5,7 +5,6 @@ from predict_rlm import Workspace
 
 from fractal.session import SessionHistoryTurn
 
-
 BASE_EDIT_WORKSPACE_INSTRUCTIONS = """Act as a focused coding agent over the mounted workspace.
 
 You receive:

@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-
 pytest.importorskip(
     "predict_rlm",
     reason="predict-rlm is required for Fractal session tests",
@@ -15,7 +14,7 @@ pytest.importorskip(
 def test_session_round_trip(tmp_path: Path) -> None:
     from predict_rlm import RunTrace
 
-    from fractal.session import FractalSession, SCHEMA_VERSION, session_path
+    from fractal.session import SCHEMA_VERSION, FractalSession, session_path
 
     session = FractalSession()
     turn_id = session.add_user_message("change the README")
@@ -204,7 +203,7 @@ def test_session_can_store_max_iteration_turn(tmp_path: Path) -> None:
 def test_session_can_store_interrupted_turn(tmp_path: Path) -> None:
     from predict_rlm import RunTrace
 
-    from fractal.session import FractalSession, INTERRUPTED_ERROR
+    from fractal.session import INTERRUPTED_ERROR, FractalSession
 
     session = FractalSession()
     turn_id = session.add_user_message("long task")

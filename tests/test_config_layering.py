@@ -6,7 +6,6 @@ from types import SimpleNamespace
 
 import pytest
 
-
 GLOBAL_CONFIG = """
 schema_version = 1
 active_provider = "openai-api"

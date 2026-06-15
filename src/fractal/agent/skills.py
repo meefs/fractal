@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from predict_rlm import Skill
 
-
 FILESYSTEM_CODING_INSTRUCTIONS = """
 # Python filesystem cheatsheet for an agent
 

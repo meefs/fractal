@@ -23,7 +23,6 @@ from .providers import (
     resolve_api_key,
 )
 
-
 DEFAULT_TIMEOUT_SECONDS = 5.0
 
 Opener = Callable[[urllib.request.Request, float], int]

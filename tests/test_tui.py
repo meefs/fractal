@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-from io import StringIO
-from pathlib import Path
 import signal
 import tomllib
+from io import StringIO
+from pathlib import Path
 
 import pytest
 from rich.console import Console
-
 
 pytest.importorskip(
     "predict_rlm",
@@ -55,8 +54,7 @@ class FakeRuntime:
         self.session = FractalSession()
 
     def resume(self, session_id: str) -> None:
-        from fractal.session import FractalSession
-        from fractal.session import session_path
+        from fractal.session import FractalSession, session_path
 
         self.resumed.append(session_id)
         if not session_path(self.workspace_path, session_id).exists():
@@ -248,9 +246,7 @@ def agent_statuses(runtime: FakeRuntime) -> list[str | None]:
 def test_terminal_tui_renders_summary_as_native_output(tmp_path: Path) -> None:
     from rich.padding import Padding
 
-    from fractal.tui.app import render_summary
-    from fractal.tui.app import render_agent_response
-    from fractal.tui.app import render_user_message
+    from fractal.tui.app import render_agent_response, render_summary, render_user_message
 
     runtime = FakeRuntime(tmp_path)
     turn_id = runtime.session.add_user_message("hello fractal")
@@ -275,8 +271,7 @@ def test_terminal_tui_renders_summary_as_native_output(tmp_path: Path) -> None:
 
 
 def test_terminal_tui_prompt_label_is_purple() -> None:
-    from fractal.tui.app import PROMPT_STYLE
-    from fractal.tui.app import render_prompt_label
+    from fractal.tui.app import PROMPT_STYLE, render_prompt_label
 
     label = render_prompt_label()
 
@@ -287,8 +282,7 @@ def test_terminal_tui_prompt_label_is_purple() -> None:
 def test_terminal_tui_renders_final_response_as_markdown(tmp_path: Path) -> None:
     from rich.markdown import Markdown
 
-    from fractal.tui.app import FractalMarkdown
-    from fractal.tui.app import render_agent_message
+    from fractal.tui.app import FractalMarkdown, render_agent_message
 
     runtime = FakeRuntime(tmp_path)
     turn_id = runtime.session.add_user_message("format response")

@@ -10,12 +10,12 @@ from predict_rlm import PredictRLM, RunTrace, Workspace, WorkspaceMode
 from predict_rlm.backends import ExecutionBackend, SbxBackend
 from predict_rlm.workspace import DirectWorkspaceMount
 
-from .schema import FractalIterationEvent, FractalResult
-from .signature import build_edit_workspace_signature
-from .skills import filesystem_coding_skill
 from ..events import build_predict_runtime_hooks
 from ..lm_types import RuntimeLM
 from ..session import SessionHistoryTurn
+from .schema import FractalIterationEvent, FractalResult
+from .signature import build_edit_workspace_signature
+from .skills import filesystem_coding_skill
 
 
 class FractalInterpreter(ExecutionBackend, Protocol):

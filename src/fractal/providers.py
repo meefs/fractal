@@ -11,7 +11,6 @@ from urllib.parse import urlparse
 
 from .lm_types import RuntimeLM
 
-
 OPENAI_CODEX = "openai-codex"
 OPENAI_API = "openai-api"
 ANTHROPIC = "anthropic"

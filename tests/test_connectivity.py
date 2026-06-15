@@ -31,8 +31,8 @@ def _http_error(url: str, code: int) -> urllib.error.HTTPError:
 
 
 def test_connectivity_sends_credential_and_accepts_success() -> None:
-    from fractal.providers import ANTHROPIC, ProviderSelection
     from fractal.connectivity import check_provider_connectivity
+    from fractal.providers import ANTHROPIC, ProviderSelection
 
     requests: list[urllib.request.Request] = []
 
@@ -53,11 +53,11 @@ def test_connectivity_sends_credential_and_accepts_success() -> None:
 
 
 def test_connectivity_reports_rejected_credential_without_leaking_it() -> None:
-    from fractal.providers import OPENAI_API, ProviderSelection
     from fractal.connectivity import (
         ProviderConnectivityError,
         check_provider_connectivity,
     )
+    from fractal.providers import OPENAI_API, ProviderSelection
 
     def opener(request: urllib.request.Request, timeout: float) -> int:
         raise _http_error(request.full_url, 401)
@@ -76,11 +76,11 @@ def test_connectivity_reports_rejected_credential_without_leaking_it() -> None:
 
 
 def test_connectivity_reports_unreachable_ollama_with_hint() -> None:
-    from fractal.providers import OLLAMA, ProviderSelection
     from fractal.connectivity import (
         ProviderConnectivityError,
         check_provider_connectivity,
     )
+    from fractal.providers import OLLAMA, ProviderSelection
 
     def opener(request: urllib.request.Request, timeout: float) -> int:
         raise urllib.error.URLError("connection refused")
@@ -98,8 +98,8 @@ def test_connectivity_reports_unreachable_ollama_with_hint() -> None:
 
 
 def test_connectivity_skips_codex_cli_provider() -> None:
-    from fractal.providers import OPENAI_CODEX, ProviderSelection
     from fractal.connectivity import check_provider_connectivity
+    from fractal.providers import OPENAI_CODEX, ProviderSelection
 
     def opener(request: urllib.request.Request, timeout: float) -> int:
         raise AssertionError("codex must not trigger a network call")

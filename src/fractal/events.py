@@ -5,7 +5,6 @@ import shlex
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-
 RuntimeEventKind = Literal["file_read", "file_write", "command"]
 
 FILE_HOOK_PHASES = {"before", "after", "error"}

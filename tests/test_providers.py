@@ -173,7 +173,7 @@ def test_api_backed_providers_normalize_model_strings(
     model: str,
     expected: str,
 ) -> None:
-    from fractal.providers import get_provider, ProviderSelection, build_lm
+    from fractal.providers import ProviderSelection, build_lm, get_provider
 
     env_name = get_provider(provider).default_api_key_env
     assert env_name is not None
@@ -290,10 +290,10 @@ def test_codex_validation_requires_official_codex_cli(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from fractal.providers import (
-        check_provider_readiness,
-        MissingCodexCliError,
         OPENAI_CODEX,
+        MissingCodexCliError,
         ProviderSelection,
+        check_provider_readiness,
     )
 
     install_fake_codex_modules(monkeypatch)
@@ -312,8 +312,8 @@ def test_codex_validation_requires_usable_codex_cli_auth(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from fractal.providers import (
-        MissingCodexAuthError,
         OPENAI_CODEX,
+        MissingCodexAuthError,
         ProviderSelection,
         build_lm,
     )
