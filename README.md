@@ -1,4 +1,5 @@
 <br/>
+
 <p align="center">
   <a href="https://fractal.trampoline.ai">
     <img src="https://raw.githubusercontent.com/Trampoline-AI/fractal/main/assets/logo-mark.png" alt="Fractal" width="132" height="132"/>
@@ -29,19 +30,81 @@
 
 <p align="center">
   <a href="https://fractal.trampoline.ai"><strong>Website</strong></a> ·
+  <a href="https://www.trampoline.ai/"><strong>Trampoline AI</strong></a> ·
   <a href="#installation"><strong>Install</strong></a> ·
   <a href="#how-it-works"><strong>How it works</strong></a> ·
   <a href="https://github.com/Trampoline-AI/predict-rlm"><strong>predict-rlm</strong></a> ·
   <a href="https://discord.gg/BAkd288sGN"><strong>Discord</strong></a>
 </p>
 
-<br/>
+<p align="center">
+  <sub>crafted with ♥ in MTL · NYC · FLP · by <a href="https://www.trampoline.ai/">Trampoline AI</a></sub>
+</p>
+
+## Quick start
 
 ```bash
 curl -LsSf https://fractal.trampoline.ai/install.sh | sh
 ```
 
-<br/>
+This installs the `fractal` command (and [uv](https://docs.astral.sh/uv/) if you
+don't have it). Make sure you meet the [Requirements](#requirements) below, then
+drop into any project and run `fractal`.
+
+## Requirements
+
+- **Python 3.11+**.
+- **[uv](https://docs.astral.sh/uv/)** to install and run Fractal.
+- **Docker**, running. Every Fractal turn executes generated code inside a
+  Docker Sandbox, so the Docker daemon must be up.
+- **The `sbx` CLI, logged in.** Fractal uses predict-rlm's `sbx` (Docker
+  Sandboxes) backend for code execution:
+
+  ```bash
+  brew install docker/tap/sbx
+  sbx login
+  ```
+
+  If Docker is not running or `sbx` is not logged in, the first turn fails. You
+  can verify the rest of your setup (provider, model, auth) ahead of time with
+  `fractal config status`.
+- **A model provider.** One of the providers in the
+  [configuration table](#configuration), with its API key available (or
+  `codex login` for `openai-codex`, or a local Ollama server). Setup walks you
+  through this on first run.
+
+## Installation
+
+[Quick start](#quick-start) covers the one-line installer, which installs
+[uv](https://docs.astral.sh/uv/) if needed, installs Fractal as an isolated
+tool, and checks your Docker/`sbx` prerequisites. To pin a version, set
+`FRACTAL_VERSION`.
+
+If you already use uv or pipx, install the tool directly instead:
+
+```bash
+uv tool install fractal-rlm  # or: pipx install fractal-rlm
+fractal --help
+```
+
+Both create an isolated environment and put `fractal` on your PATH, so it is
+callable from any directory.
+
+## Use it with your coding agent
+
+Fractal shines as a tool your main agent (Claude Code, Cursor, …) defers to for
+heavy, large-context jobs: it hands Fractal the work in
+[headless mode](#headless--ci-use) and gets back a distilled answer. The bundled
+**`fractal` skill** teaches an agent when and how to do this.
+
+Install it in Claude Code, Codex, Cursor, or any compatible coding agent:
+
+```bash
+npx skills add https://github.com/Trampoline-AI/fractal/tree/main/.agents/skills/fractal
+```
+
+See [Headless / CI use](#headless--ci-use) for the full non-interactive
+interface.
 
 ## What is Fractal?
 
@@ -70,6 +133,12 @@ people build with it, and to be **the easiest way to get started with an RLM**
 and actually understand how one works, by experimenting on your own tasks.
 
 ## How it works
+
+Every Fractal turn runs fully inside a [Docker Sandbox](https://hub.docker.com/u/dockersbx)
+(`sbx`) — an isolated container with no network access by default. Your workspace
+is mounted directly into the sandbox via an SBX passthrough mount, so the agent
+reads and edits your actual files in place; changes appear on the host
+immediately, with no copy or sync step needed.
 
 The agent recurses. predict-rlm spawns sub-LMs to work the shards of a task that
 won't fit one context, then folds their results back up:
@@ -105,6 +174,8 @@ RLM turn 2/30 (ok)
   timeline.md; the 4 upcoming deadlines are on your calendar.
 ```
 
+> This is a pseudo trace, to help you understand what goes on inside the RLM.
+
 A single line can stand in for a million sub-calls — in direct contrast to
 agents that must mechanically emit each sub-agent call one at a time. And every
 peek, chunk, sub-call, and verification step is fully readable in the trace.
@@ -122,7 +193,7 @@ the context is the hard part. Two ways to use it:
 - **As a tool other agents defer to** — your main agent (Claude Code, Cursor,
   etc.) can hand a heavy analysis or large-context job to Fractal in
   [headless mode](#headless--ci-use) and get back a distilled answer. The
-  bundled [`fractal-headless` skill](.agents/skills/fractal-headless/SKILL.md)
+  bundled [`fractal` skill](.agents/skills/fractal/SKILL.md)
   teaches an agent when and how to do this.
 
 Fractal is not trying to replace your daily coding agent — more mature tools
@@ -139,63 +210,7 @@ exist for that. It's a window onto what a self-harnessed RLM can do.
 - **◆ Headless & scriptable** — drive it from CI or another agent with
   `fractal -p "…"`.
 
-## Installation
-
-The quickest way to install the `fractal` command:
-
-```bash
-curl -LsSf https://fractal.trampoline.ai/install.sh | sh
-```
-
-The script installs [uv](https://docs.astral.sh/uv/) if needed, installs
-Fractal as an isolated tool, and checks your Docker/`sbx` prerequisites. To pin
-a version, set `FRACTAL_VERSION`.
-
-If you already use uv or pipx, install the tool directly instead:
-
-```bash
-uv tool install fractal-rlm  # or: pipx install fractal-rlm
-fractal --help
-```
-
-Both create an isolated environment and put `fractal` on your PATH, so it is
-callable from any directory.
-
-To work on Fractal itself, clone the repository and use uv:
-
-```bash
-git clone git@github.com:Trampoline-AI/fractal.git
-cd fractal
-uv sync
-uv run fractal --help
-```
-
-When running from a checkout, prefix the commands below with `uv run`
-(e.g. `uv run fractal`); an installed tool just uses `fractal`.
-
-## Requirements
-
-- **Python 3.11+**.
-- **[uv](https://docs.astral.sh/uv/)** to install and run Fractal.
-- **Docker**, running. Every Fractal turn executes generated code inside a
-  Docker Sandbox, so the Docker daemon must be up.
-- **The `sbx` CLI, logged in.** Fractal uses predict-rlm's `sbx` (Docker
-  Sandboxes) backend for code execution:
-
-  ```bash
-  brew install docker/tap/sbx
-  sbx login
-  ```
-
-  If Docker is not running or `sbx` is not logged in, the first turn fails. You
-  can verify the rest of your setup (provider, model, auth) ahead of time with
-  `fractal config status`.
-- **A model provider.** One of the providers in the
-  [configuration table](#configuration), with its API key available (or
-  `codex login` for `openai-codex`, or a local Ollama server). Setup walks you
-  through this on first run.
-
-## Quickstart
+## First run
 
 ```bash
 cd your-project
@@ -220,6 +235,21 @@ Interactive slash commands: `/help`, `/sessions`, `/resume <id>`, `/new`,
 `/model`, `/provider`, `/usage`, `/verbose`, `/exit`. The header always shows
 both the main model and the sub-model.
 
+### Workspace and included directories
+
+By default Fractal mounts the directory it was launched from as the workspace —
+that's what the sandbox sees and what the agent reads and edits.
+
+- **`--workspace DIR`** changes which directory is mounted as the workspace,
+  so you can run Fractal against a project other than the current directory.
+- **`--include DIR`** (repeatable) mounts an *additional* directory into the
+  sandbox at its absolute path. Use it when the agent needs files that live
+  outside the workspace. Common cases:
+  - **Local path dependencies** — a sibling package or editable install your
+    project points at by path; include it so the agent can read and run it.
+  - **Git worktrees** — a worktree's `.git` lives in the main checkout, so
+    include that directory to give Fractal access to the real git history.
+
 ### Command-line options
 
 | Flag | Description |
@@ -240,9 +270,8 @@ configuration (see [Configuration](#configuration)).
 
 ### Headless / CI use
 
-`-p`/`--prompt` runs a single turn without the interactive UI, which is the
-mode to use from scripts, hooks, and CI — and how another agent hands Fractal
-the heavy lifting:
+`-p`/`--prompt` runs a single turn without the interactive UI — use it from
+scripts, hooks, CI, or to hand Fractal heavy work from another agent:
 
 ```bash
 fractal -p "fix the failing tests"          # one turn, prompt as an argument
@@ -250,199 +279,46 @@ git diff | fractal -p -                      # read the entire prompt from stdin
 echo "summarize recent changes" | fractal -p "review this diff"  # prompt + stdin context
 ```
 
-How non-interactive runs behave:
-
-- The agent's reply is written to **stdout**; progress, the workspace/session
-  banner, changed-file lists, and usage go to **stderr**. This lets you pipe
-  the response cleanly while still seeing diagnostics.
-- Add `--quiet` to silence everything but the final stdout response.
-- Add `--json` for a single machine-readable result object on stdout
-  (`session_id`, `status`, `response`, `changed_files`, `usage`, `error`)
-  instead of plain text; pair with `--quiet` for stdout-only JSON.
-- An empty prompt is a no-op: Fractal exits `0` without making a model call.
-- Stdin input is capped at 10 MiB.
-- Exit codes: `0` success, `1` error (bad input, setup/runtime failure),
-  `2` the turn hit `--max-iterations` before completing, `130` interrupted.
-- A provider must already be configured. Headless runs do **not** trigger
-  interactive setup when stdin is not a TTY; configure first with
-  `fractal config setup`, or pin a model inline with `--lm`. Environment
-  variables (`FRACTAL_PROVIDER`, `FRACTAL_MODEL`, …) are convenient for CI —
-  see [Configuration](#configuration).
-- Docker must be running and `sbx` logged in on the runner, exactly as for
-  interactive use.
-
-After each turn Fractal shows host-recorded facts: iterations, wall time,
-tokens in/out, the current RLM context size, billed cost, and changed files.
-Because the RLM loop re-summarizes between turns, "context" is the prompt size
-of the latest main-LM call rather than a cumulative count. `/usage` reports
-session totals, which persist in `.fractal/sessions/<session-id>.json` and
-survive `--resume`.
+See [docs/headless.md](docs/headless.md) for the full output contract, exit codes, and CI patterns.
 
 ## Configuration
 
-Fractal uses a global TOML config for non-secret provider and model settings.
-On first interactive run, if no global config exists, Fractal starts setup
-automatically. Setup uses inline keyboard menus for provider and model
-selection:
+On first run, Fractal walks you through setup interactively — pick a provider,
+model, and how to supply your API key. In an interactive session, use `/provider`
+to change provider and `/model` to switch models.
 
-```bash
-uv run fractal
-```
+Supported providers:
 
-You can also run setup directly. Use Up/Down to move through highlighted
-choices, Space to select, and Enter to confirm:
+| Provider | Default API key env var |
+| --- | --- |
+| `openai-codex` | `codex login --device-auth` |
+| `openai-api` | `OPENAI_API_KEY` |
+| `anthropic` | `ANTHROPIC_API_KEY` |
+| `gemini` | `GEMINI_API_KEY` |
+| `xai` | `XAI_API_KEY` |
+| `deepseek` | `DEEPSEEK_API_KEY` |
+| `mistral` | `MISTRAL_API_KEY` |
+| `groq` | `GROQ_API_KEY` |
+| `openrouter` | `OPENROUTER_API_KEY` |
+| `ollama` | local server, no key |
+| `custom-openai-compatible` | `CUSTOM_OPENAI_API_KEY` |
 
-```bash
-uv run fractal config setup
-uv run fractal config status
-uv run fractal config show
-```
-
-For scripts and quick edits there is non-interactive dotted-key access. `set`
-parses TOML literals (`12`, `true`) and falls back to strings; values are
-validated against the schema before anything is written, and raw secrets are
-rejected. `--project` targets the workspace config instead of the global one:
-
-```bash
-uv run fractal config get active_model
-uv run fractal config set active_model gpt-5.4-mini
-uv run fractal config set defaults.max_iterations 12
-uv run fractal config set active_model gpt-5.4 --project
-uv run fractal config unset active_sub_model
-```
-
-Setting `active_model` or `active_sub_model` warns when the model is not in
-the provider's known catalog, and refuses ids the provider restricts.
-
-To start over, `config reset` deletes the global config after confirmation
-(`--yes` skips the prompt); add `--credentials` to also delete locally stored
-API keys. Project configs are never touched by reset:
-
-```bash
-uv run fractal config reset
-uv run fractal config reset --credentials --yes
-```
-
-The default config path is `~/.config/fractal/config.toml`, or
-`$XDG_CONFIG_HOME/fractal/config.toml` when `XDG_CONFIG_HOME` is set. The config
-stores provider ids, model names, auth source metadata, API-key environment
-variable names, and custom OpenAI-compatible base URLs. It must not store raw
-API keys, OAuth tokens, or other secrets.
-
-Supported MVP providers:
-
-| Provider | Auth source | Default credential reference |
-| --- | --- | --- |
-| `openai-codex` | Official Codex CLI login | `codex login --device-auth` |
-| `openai-api` | Environment variable | `OPENAI_API_KEY` |
-| `anthropic` | Environment variable | `ANTHROPIC_API_KEY` |
-| `gemini` | Environment variable | `GEMINI_API_KEY` |
-| `xai` | Environment variable | `XAI_API_KEY` |
-| `deepseek` | Environment variable | `DEEPSEEK_API_KEY` |
-| `mistral` | Environment variable | `MISTRAL_API_KEY` |
-| `groq` | Environment variable | `GROQ_API_KEY` |
-| `openrouter` | Environment variable | `OPENROUTER_API_KEY` |
-| `ollama` | Local server, no credential | `http://localhost:11434` |
-| `custom-openai-compatible` | Environment variable plus base URL | User-selected env var |
-
-`openai-codex` requires the official `codex` CLI and an existing Codex login.
-Fractal reads Codex CLI auth through PredictRLM's `dspy_codex_lm.CodexLM`
-adapter and does not copy Codex OAuth tokens into Fractal config. Fractal only
-offers the Codex `gpt-5.5` family during setup right now.
-
-Setup model menus are curated starting points, not exhaustive provider
-catalogs. Every provider except `openai-codex` also accepts a free-form model
-id (the "Custom model..." entry in menus), so newly released models work
-without a Fractal update. `ollama` talks to a local Ollama server and needs no
-API key; setup asks for the server URL (default `http://localhost:11434`) and
-queries `/api/tags` so models you have actually pulled are listed first,
-marked "(installed)", falling back to static suggestions when the server is
-not running.
-
-For API-key providers, setup asks how to provide the key: paste it directly
-(the default), or reference an environment variable. Pasted keys are stored in
-`~/.config/fractal/credentials.toml` with `0600` permissions, next to the
-config but never inside it; the config records only `auth_source = "stored"`.
-
-If setup uses an environment variable that is currently unset, it still writes
-the config (which never contains secrets) and prints the exact variable to
-export; `fractal config status` verifies readiness afterwards.
-
-Setup and `config status` also make one cheap authenticated request against
-the provider (a models-list endpoint, or `/api/tags` for Ollama) so a typo'd
-or revoked key is caught immediately instead of on the first agent turn. Pass
-`--offline` to skip the live check; network failures during setup only warn
-and never discard a finished setup.
-
-Config is resolved in layers: the global file, then per-workspace overrides in
-`<workspace>/.fractal/config.toml` (same schema, every field optional), then
-`FRACTAL_PROVIDER` / `FRACTAL_MODEL` / `FRACTAL_SUB_PROVIDER` /
-`FRACTAL_SUB_MODEL` / `FRACTAL_MAX_ITERATIONS` / `FRACTAL_VERBOSE`
-environment variables, with CLI
-flags on top. A repo can pin its model without touching anyone's global
-config, and CI can override via env. `fractal config show` lists which layers
-contributed. Environment overrides apply only once some config file exists,
-so first-run onboarding still triggers.
-
-Beyond the active provider and model, the config supports:
-
-```toml
-# optional: a cheaper model for RLM sub-calls; chosen during setup and /model,
-# defaults to the main model
-active_sub_model = "gpt-5.4-mini"
-# optional: run the sub-model on a different provider (its auth is collected
-# during setup too); defaults to the main provider
-active_sub_provider = "groq"
-
-[defaults]            # optional run defaults, overridden by CLI flags
-max_iterations = 30   # --max-iterations
-verbose = false       # --verbose
-```
-
-The config can hold several provider profiles at once. Setup merges into the
-existing `providers` table instead of replacing it, marks already-configured
-providers in the menu, defaults to the active one, and offers to keep their
-saved auth — so switching back to a configured provider is just two prompts
-(provider, model), and `fractal config set active_provider <id>` switches
-non-interactively. Switching providers clears `active_sub_model`; run
-defaults are preserved.
-
-Inside the interactive session, `/provider` re-runs provider setup and
-`/model` switches models for the configured providers, and `/verbose`
-toggles trace display. Setup walks main provider → main model → sub-model
-provider (defaulting to "same as main provider") → sub-model, then collects
-auth for each distinct provider; `/model` changes only the two models within
-their providers.
-
-For one-off runs or tests, `--lm` bypasses global config resolution:
-
-```bash
-uv run fractal --lm openai/gpt-5.5 -p "summarize this repo"
-```
-
-## Troubleshooting
-
-- **A turn fails immediately / "sandbox" errors.** Docker is not running or
-  `sbx` is not logged in. Start Docker, run `sbx login`, then retry. After an
-  interrupted shutdown a sandbox can be left behind — list with `sbx ls` and
-  remove with `sbx rm --force <name>`.
-- **`fractal config status` reports the provider isn't ready.** The API key is
-  missing or invalid. Re-run `fractal config setup`, or export the environment
-  variable it names. Use `--offline` to skip the live provider check.
-- **First run doesn't start setup.** Setup auto-runs only on an interactive
-  (TTY) first run with no global config. In a non-interactive context, run
-  `fractal config setup` explicitly or pass `--lm`.
-- **A newly released model is rejected.** Most providers accept a free-form id
-  via the "Custom model..." menu entry or `fractal config set active_model
-  <id>`; only providers with `restricted_models` refuse unknown ids.
+See [docs/config.md](docs/config.md) for credentials, non-interactive access, environment variable overrides, and the full config schema.
 
 ## Development
 
+To work on Fractal itself, clone the repository and use uv:
+
 ```bash
+git clone git@github.com:Trampoline-AI/fractal.git
+cd fractal
 uv sync                # install dependencies
 uv run fractal --help
 uv run pytest          # 200+ tests
 ```
+
+When running from a checkout, prefix commands with `uv run` (e.g. `uv run
+fractal`); an installed tool just uses `fractal`.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow and
 [CHANGELOG.md](CHANGELOG.md) for release notes.
@@ -462,10 +338,3 @@ The real magic is the runtime underneath.
 
 Fractal is a fully open-source proof of concept we're putting out to see what
 people build with it. It's early, and moving fast.
-
-<br/>
-
-<p align="center">
-  crafted with ♥ in MTL · NYC · FLP<br/>
-  by <a href="https://www.trampoline.ai/">Trampoline AI</a>
-</p>

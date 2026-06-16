@@ -1,5 +1,5 @@
 ---
-name: fractal-headless
+name: fractal
 description: Delegate analysis- and context-heavy work to Fractal, an agentic CLI powered by a self-harnessed Recursive Language Model (predict-rlm), by running it non-interactively (fractal -p). Reach for it when a task needs reasoning over a large or deep codebase, synthesizing an answer across many files, auditing, or open-ended investigation — work that would otherwise flood your own context. The RLM reasons over context programmatically (no context rot) and returns a distilled answer. Use when asked to run Fractal headless, script it, call it from CI or another agent, or offload a heavy analysis/large-context task. Less suited to trivial single-file edits you can do directly.
 ---
 
@@ -10,6 +10,28 @@ a self-harnessed Recursive Language Model runtime. Each invocation runs one RLM
 turn: it mounts the workspace into a Docker sandbox, lets the model write and
 run its own code to read/edit files and run commands, then prints a final
 answer. Headless mode is `fractal -p "<task>"`.
+
+## Install Fractal (if needed)
+
+Before anything else, check that the `fractal` command exists, and install it if
+it doesn't:
+
+```bash
+command -v fractal >/dev/null 2>&1 \
+  && fractal --version \
+  || curl -LsSf https://fractal.trampoline.ai/install.sh | sh
+```
+
+The installer bootstraps [uv](https://docs.astral.sh/uv/) if needed, installs
+Fractal as an isolated tool, and puts `fractal` on the PATH. If it was just
+installed in this shell, `fractal` may not be on the PATH until you start a new
+shell or re-source your profile.
+
+Fractal also needs, at runtime:
+
+- **Docker**, running — every turn executes in a Docker sandbox.
+- **The `sbx` CLI, logged in** — `brew install docker/tap/sbx && sbx login`.
+- **A configured model provider** — verify with the [Preflight](#preflight-do-once-per-machinesession) checks below.
 
 ## When to reach for it
 
