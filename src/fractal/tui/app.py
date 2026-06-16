@@ -418,10 +418,6 @@ class TerminalFractalApp:
             fragments.append(
                 ("class:bottom-toolbar.value", f"{_format_token_count(tokens)} tok")
             )
-            if totals.cost:
-                fragments.append(
-                    ("class:bottom-toolbar.value", f" ${totals.cost:.2f}")
-                )
         return fragments
 
     def _show_interrupting_status(self) -> None:
@@ -1014,8 +1010,6 @@ def render_turn_footer(result: FractalResult) -> Text:
         )
     if usage.context_tokens:
         parts.append(f"{_format_tokens(usage.context_tokens)} ctx")
-    if usage.cost:
-        parts.append(f"${usage.cost:.4f}")
     for part in parts:
         footer.append(" · ", style="dim")
         footer.append(part, style="dim")

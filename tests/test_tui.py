@@ -1223,7 +1223,7 @@ def test_turn_footer_includes_usage_and_context() -> None:
     assert "12.4s" in footer
     assert "8.2k in / 400 out" in footer
     assert "7.4k ctx" in footer
-    assert "$0.0413" in footer
+    assert "$0.0413" not in footer
 
 
 def test_turn_footer_without_trace_is_plain_complete() -> None:
@@ -1233,6 +1233,28 @@ def test_turn_footer_without_trace_is_plain_complete() -> None:
     footer = render_turn_footer(FractalResult(response="done")).plain
 
     assert footer == "✓ complete"
+
+
+def test_bottom_toolbar_omits_accumulated_cost(tmp_path: Path) -> None:
+    from fractal.session import TurnUsage
+    from fractal.tui import TerminalFractalApp
+
+    runtime = FakeRuntime(tmp_path)
+    turn_id = runtime.session.add_user_message("fix")
+    runtime.session.add_agent_turn(status="succeeded", response="ok", turn_id=turn_id)
+    last_turn = runtime.session.turns[-1]
+    assert last_turn.agent is not None
+    last_turn.agent.usage = TurnUsage(
+        input_tokens=8200,
+        output_tokens=400,
+        cost=0.0413,
+    )
+    app = TerminalFractalApp(runtime)
+
+    toolbar = "".join(fragment for _, fragment in app._bottom_toolbar_fragments())
+
+    assert "8.6k tok" in toolbar
+    assert "$0.04" not in toolbar
 
 
 def test_terminal_tui_help_command_lists_commands(tmp_path: Path) -> None:
