@@ -210,9 +210,11 @@ class FakePromptSession:
     def __init__(self, messages: list[str]) -> None:
         self.messages = messages
         self.prompts: list[object] = []
+        self.prompt_kwargs: list[dict[str, object]] = []
 
     async def prompt_async(self, prompt: object, **kwargs: object) -> str:
         self.prompts.append(prompt)
+        self.prompt_kwargs.append(kwargs)
         if not self.messages:
             raise EOFError
         return self.messages.pop(0)
@@ -277,6 +279,22 @@ def test_terminal_tui_prompt_label_is_purple() -> None:
 
     assert label.spans[0].style == "bold #8b5cf6"
     assert PROMPT_STYLE.style_rules[0] == ("prompt", "bold #8b5cf6")
+
+
+def test_terminal_tui_prompt_continuation_has_no_ellipsis() -> None:
+    from fractal.tui.app import _prompt_continuation
+
+    assert _prompt_continuation(8, 1, True) == "        "
+    assert "…" not in _prompt_continuation(8, 1, True)
+
+
+def test_terminal_tui_word_wrap_prefers_whitespace() -> None:
+    from fractal.tui.app import _word_wrap_break_index
+
+    assert _word_wrap_break_index("hello world", 8) == len("hello ")
+    assert _word_wrap_break_index("superlongword", 5) == 5
+    assert _word_wrap_break_index("fits", 10) == 4
+    assert _word_wrap_break_index("alpha beta gamma", 12) == len("alpha beta ")
 
 
 def test_terminal_tui_renders_final_response_as_markdown(tmp_path: Path) -> None:
@@ -777,6 +795,7 @@ def test_terminal_tui_uses_prompt_toolkit_session_for_live_input(tmp_path: Path)
     text = output.getvalue()
     assert runtime.submitted == ["fix"]
     assert prompt_session.prompts
+    assert prompt_session.prompt_kwargs[0]["wrap_lines"] is True
     assert "response to fix" in text
 
 

@@ -5,20 +5,25 @@ import re
 import signal
 import sys
 from pathlib import Path
+from types import MethodType
 from typing import Protocol, TextIO
 
 from predict_rlm import RunTrace
 from predict_rlm.trace import IterationStep
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.data_structures import Point
 from prompt_toolkit.document import Document
 from prompt_toolkit.filters import Condition
-from prompt_toolkit.formatted_text import HTML
+from prompt_toolkit.formatted_text import HTML, fragment_list_width, to_formatted_text
 from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.layout.containers import HSplit, Window
+from prompt_toolkit.layout.containers import HSplit, Window, WindowAlign
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.layout import Layout
+from prompt_toolkit.layout.screen import _CHAR_CACHE
+from prompt_toolkit.layout.utils import explode_text_fragments
 from prompt_toolkit.styles import Style
+from prompt_toolkit.utils import get_cwidth
 from rich.console import Console, Group
 from rich.markdown import Markdown
 from rich.padding import Padding
@@ -130,7 +135,261 @@ def slash_command_key_bindings() -> KeyBindings:
 
 
 def _prompt_continuation(width: int, line_number: int, is_soft_wrap: bool) -> str:
-    return "      … "
+    return "        "
+
+
+def _word_wrap_break_index(text: str, width: int) -> int:
+    """Return the character count to draw before a soft visual wrap.
+
+    Prefer wrapping after the last whitespace that fits in the current row. If
+    the next word is longer than the row, fall back to a character boundary so
+    the cursor can still advance.
+    """
+    if width <= 0 or not text:
+        return 0
+
+    used = 0
+    fit = 0
+    last_space = -1
+    for index, char in enumerate(text):
+        char_width = get_cwidth(char)
+        if used + char_width > width:
+            break
+        used += char_width
+        fit = index + 1
+        if char.isspace():
+            last_space = fit
+    else:
+        return len(text)
+
+    if last_space > 0:
+        return last_space
+    return max(1, fit)
+
+
+def _word_wrapped_copy_body(
+    window: Window,
+    ui_content: object,
+    new_screen: object,
+    write_position: object,
+    move_x: int,
+    width: int,
+    vertical_scroll: int = 0,
+    horizontal_scroll: int = 0,
+    wrap_lines: bool = False,
+    highlight_lines: bool = False,
+    vertical_scroll_2: int = 0,
+    always_hide_cursor: bool = False,
+    has_focus: bool = False,
+    align: WindowAlign = WindowAlign.LEFT,
+    get_line_prefix: object = None,
+) -> tuple[dict[int, tuple[int, int]], dict[tuple[int, int], tuple[int, int]]]:
+    """prompt_toolkit's input renderer with word-boundary visual wrapping.
+
+    prompt_toolkit's built-in ``wrap_lines`` is display-only, but it wraps at
+    terminal cell boundaries. For Fractal's live prompt, prefer moving the last
+    whole word to the next visual line when a whitespace boundary fits.
+    """
+    if not wrap_lines:
+        return window._fractal_original_copy_body(
+            ui_content,
+            new_screen,
+            write_position,
+            move_x,
+            width,
+            vertical_scroll=vertical_scroll,
+            horizontal_scroll=horizontal_scroll,
+            wrap_lines=wrap_lines,
+            highlight_lines=highlight_lines,
+            vertical_scroll_2=vertical_scroll_2,
+            always_hide_cursor=always_hide_cursor,
+            has_focus=has_focus,
+            align=align,
+            get_line_prefix=get_line_prefix,
+        )
+
+    xpos = write_position.xpos + move_x
+    ypos = write_position.ypos
+    line_count = ui_content.line_count
+    new_buffer = new_screen.data_buffer
+    empty_char = _CHAR_CACHE["", ""]
+    visible_line_to_row_col: dict[int, tuple[int, int]] = {}
+    rowcol_to_yx: dict[tuple[int, int], tuple[int, int]] = {}
+
+    def draw_char(style: str, c: str, lineno: int, col: int, x: int, y: int, *, is_input: bool) -> None:
+        if y >= write_position.height:
+            return
+        char = _CHAR_CACHE[c, style]
+        char_width = char.width
+        if x >= 0 and y >= 0 and x < width:
+            row = new_buffer[y + ypos]
+            row[x + xpos] = char
+            if char_width > 1:
+                for offset in range(1, char_width):
+                    row[x + xpos + offset] = empty_char
+            elif char_width == 0:
+                for previous_width in [2, 1]:
+                    if x - previous_width >= 0 and row[x + xpos - previous_width].width == previous_width:
+                        previous = row[x + xpos - previous_width]
+                        row[x + xpos - previous_width] = _CHAR_CACHE[
+                            previous.char + c,
+                            previous.style,
+                        ]
+            if is_input:
+                rowcol_to_yx[lineno, col] = (y + ypos, x + xpos)
+
+    def copy_line(line: object, lineno: int, x: int, y: int, is_input: bool = False) -> tuple[int, int]:
+
+        if is_input and get_line_prefix:
+            prompt = to_formatted_text(get_line_prefix(lineno, 0))
+            x, y = copy_line(prompt, lineno, x, y, is_input=False)
+
+        skipped = 0
+        fragments = explode_text_fragments(line)
+        if horizontal_scroll and is_input:
+            h_scroll = horizontal_scroll
+            while h_scroll > 0 and fragments:
+                h_scroll -= get_cwidth(fragments[0][1])
+                skipped += 1
+                del fragments[:1]
+            x -= h_scroll
+
+        if align == WindowAlign.CENTER:
+            line_width = fragment_list_width(fragments)
+            if line_width < width:
+                x += (width - line_width) // 2
+        elif align == WindowAlign.RIGHT:
+            line_width = fragment_list_width(fragments)
+            if line_width < width:
+                x += width - line_width
+
+        if not is_input:
+            col = 0
+            for style, chars, *_ in fragments:
+                if "[ZeroWidthEscape]" in style:
+                    new_screen.zero_width_escapes[y + ypos][x + xpos] += chars
+                    continue
+                for c in chars:
+                    char_width = get_cwidth(c)
+                    if wrap_lines and x + char_width > width:
+                        y += 1
+                        x = 0
+                        if y >= write_position.height:
+                            return x, y
+                    draw_char(style, c, lineno, col + skipped, x, y, is_input=False)
+                    col += 1
+                    x += char_width
+            return x, y
+
+        chars: list[tuple[str, str, int]] = []
+        for style, text, *_ in fragments:
+            if "[ZeroWidthEscape]" in style:
+                new_screen.zero_width_escapes[y + ypos][x + xpos] += text
+                continue
+            for c in text:
+                chars.append((style, c, skipped + len(chars)))
+
+        index = 0
+        wrap_count = 0
+        while index < len(chars):
+            if y >= write_position.height:
+                return x, y
+            available = max(0, width - x)
+            remaining_text = "".join(c for _, c, _ in chars[index:])
+            take = _word_wrap_break_index(remaining_text, available)
+            if take <= 0:
+                visible_line_to_row_col[y + 1] = (lineno, chars[index][2])
+                y += 1
+                wrap_count += 1
+                x = 0
+                if get_line_prefix:
+                    prompt = to_formatted_text(get_line_prefix(lineno, wrap_count))
+                    x, y = copy_line(prompt, lineno, x, y, is_input=False)
+                continue
+
+            for style, c, col in chars[index : index + take]:
+                char_width = get_cwidth(c)
+                if x + char_width > width:
+                    break
+                draw_char(style, c, lineno, col, x, y, is_input=True)
+                x += char_width
+            index += take
+
+            if index < len(chars):
+                visible_line_to_row_col[y + 1] = (lineno, chars[index][2])
+                y += 1
+                wrap_count += 1
+                x = 0
+                if get_line_prefix:
+                    prompt = to_formatted_text(get_line_prefix(lineno, wrap_count))
+                    x, y = copy_line(prompt, lineno, x, y, is_input=False)
+
+        return x, y
+
+    def copy() -> int:
+        y = -vertical_scroll_2
+        lineno = vertical_scroll
+        while y < write_position.height and lineno < line_count:
+            line = ui_content.get_line(lineno)
+            visible_line_to_row_col[y] = (lineno, horizontal_scroll)
+            x = 0
+            x, y = copy_line(line, lineno, x, y, is_input=True)
+            lineno += 1
+            y += 1
+        return y
+
+    copy()
+
+    def cursor_pos_to_screen_pos(row: int, col: int) -> Point:
+        try:
+            y, x = rowcol_to_yx[row, col]
+        except KeyError:
+            return Point(x=0, y=0)
+        return Point(x=x, y=y)
+
+    if ui_content.cursor_position:
+        screen_cursor_position = cursor_pos_to_screen_pos(
+            ui_content.cursor_position.y,
+            ui_content.cursor_position.x,
+        )
+        if has_focus:
+            new_screen.set_cursor_position(window, screen_cursor_position)
+            if always_hide_cursor:
+                new_screen.show_cursor = False
+            else:
+                new_screen.show_cursor = ui_content.show_cursor
+            window._highlight_digraph(new_screen)
+
+        if highlight_lines:
+            window._highlight_cursorlines(
+                new_screen,
+                screen_cursor_position,
+                xpos,
+                ypos,
+                width,
+                write_position.height,
+            )
+
+    if has_focus and ui_content.cursor_position:
+        window._show_key_processor_key_buffer(new_screen)
+
+    if ui_content.menu_position:
+        new_screen.set_menu_position(
+            window,
+            cursor_pos_to_screen_pos(
+                ui_content.menu_position.y,
+                ui_content.menu_position.x,
+            ),
+        )
+
+    new_screen.height = max(new_screen.height, ypos + write_position.height)
+    return visible_line_to_row_col, rowcol_to_yx
+
+
+def _enable_word_wrapping(window: Window) -> None:
+    if not hasattr(window, "_fractal_original_copy_body"):
+        window._fractal_original_copy_body = window._copy_body
+        window._copy_body = MethodType(_word_wrapped_copy_body, window)
 
 
 class _FooterPromptSession(PromptSession[str]):
@@ -145,6 +404,8 @@ class _FooterPromptSession(PromptSession[str]):
 
     def _create_layout(self) -> Layout:
         layout = super()._create_layout()
+        if isinstance(layout.current_window, Window):
+            _enable_word_wrapping(layout.current_window)
         container = layout.container
         if isinstance(container, HSplit):
             container.children.append(
@@ -774,6 +1035,7 @@ class TerminalFractalApp:
                 message = await self.prompt_session.prompt_async(
                     HTML("<prompt>fractal</prompt><session>›</session> "),
                     handle_sigint=False,
+                    wrap_lines=True,
                 )
             except (EOFError, KeyboardInterrupt):
                 self.console.print()
