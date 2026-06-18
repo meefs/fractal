@@ -14,7 +14,12 @@ pytest.importorskip(
 def test_session_round_trip(tmp_path: Path) -> None:
     from predict_rlm import RunTrace
 
-    from fractal.session import SCHEMA_VERSION, FractalSession, session_path
+    from fractal.session import (
+        SCHEMA_VERSION,
+        FractalSession,
+        session_path,
+        sessions_dir_path,
+    )
 
     session = FractalSession()
     turn_id = session.add_user_message("change the README")
@@ -44,6 +49,8 @@ def test_session_round_trip(tmp_path: Path) -> None:
     assert payload["schema_version"] == SCHEMA_VERSION
     assert payload["session_id"] == session.session_id
     assert session_path(tmp_path, session.session_id).name == f"{session.session_id}.json"
+    assert sessions_dir_path(tmp_path) != tmp_path / ".fractal" / "sessions"
+    assert not (tmp_path / ".fractal" / "sessions").exists()
     assert loaded.session_id == session.session_id
     assert "change the README" in loaded.summary()
     assert loaded.turns[-1].user.message == "change the README"
@@ -73,6 +80,71 @@ def test_session_round_trip(tmp_path: Path) -> None:
     assert "Files modified:" not in loaded.summary()
     assert "Commands run:" not in loaded.summary()
 
+
+def test_default_state_dir_uses_xdg_state_home(tmp_path: Path) -> None:
+    from fractal.session import default_state_dir
+
+    path = default_state_dir(env={"XDG_STATE_HOME": str(tmp_path)})
+
+    assert path == tmp_path / "fractal"
+
+
+def test_default_state_dir_prefers_fractal_state_home(tmp_path: Path) -> None:
+    from fractal.session import default_state_dir
+
+    path = default_state_dir(
+        env={
+            "FRACTAL_STATE_HOME": str(tmp_path / "custom"),
+            "XDG_STATE_HOME": str(tmp_path / "xdg"),
+        }
+    )
+
+    assert path == tmp_path / "custom"
+
+
+def test_default_state_dir_uses_home_when_state_env_is_unset(tmp_path: Path) -> None:
+    from fractal.session import default_state_dir
+
+    path = default_state_dir(env={}, home=tmp_path)
+
+    assert path == tmp_path / ".local" / "state" / "fractal"
+
+
+def test_sessions_dir_path_is_stable_and_outside_workspace(tmp_path: Path) -> None:
+    from fractal.session import sessions_dir_path
+
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+
+    first = sessions_dir_path(workspace)
+    second = sessions_dir_path(workspace)
+
+    assert first == second
+    assert first.name == "sessions"
+    assert first.parent.parent.name == "workspaces"
+    assert not first.is_relative_to(workspace)
+
+
+def test_sessions_for_different_workspaces_with_same_basename_do_not_collide(
+    tmp_path: Path,
+) -> None:
+    from fractal.session import FractalSession, list_sessions, sessions_dir_path
+
+    first_workspace = tmp_path / "one" / "repo"
+    second_workspace = tmp_path / "two" / "repo"
+    first_workspace.mkdir(parents=True)
+    second_workspace.mkdir(parents=True)
+
+    first = FractalSession(session_id="first")
+    first.add_user_message("first workspace")
+    first.save(first_workspace)
+    second = FractalSession(session_id="second")
+    second.add_user_message("second workspace")
+    second.save(second_workspace)
+
+    assert sessions_dir_path(first_workspace) != sessions_dir_path(second_workspace)
+    assert [info.session_id for info in list_sessions(first_workspace)] == ["first"]
+    assert [info.session_id for info in list_sessions(second_workspace)] == ["second"]
 
 def test_load_without_session_id_starts_new_session(tmp_path: Path) -> None:
     from fractal.session import FractalSession

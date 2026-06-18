@@ -258,7 +258,7 @@ that's what the sandbox sees and what the agent reads and edits.
 | `--workspace DIR` | Workspace directory to edit; defaults to the current directory. |
 | `--include DIR` | Additional directory to mount into the sandbox at its absolute path. Repeatable. |
 | `-p`, `--prompt TEXT` | Run one turn non-interactively with `TEXT`; use `-` to read the prompt from stdin. |
-| `--resume SESSION_ID` | Resume an existing workspace-local session by id. |
+| `--resume SESSION_ID` | Resume an existing workspace-scoped session by id. |
 | `--max-iterations N` | Max RLM iterations per turn; defaults to the configured value or 30. |
 | `--lm MODEL` | Override the configured main model for this run (bypasses config resolution). |
 | `--sub-lm MODEL` | Override the configured sub-model for this run. |

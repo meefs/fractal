@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import os
+import re
 import shutil
 import uuid
 import warnings
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -11,8 +15,10 @@ from typing import Literal
 from predict_rlm import RunTrace
 from pydantic import BaseModel, Field
 
-SESSION_DIR = ".fractal"
+STATE_DIR = "fractal"
+WORKSPACES_DIR = "workspaces"
 SESSIONS_DIR = "sessions"
+ENV_STATE_HOME = "FRACTAL_STATE_HOME"
 SCHEMA_VERSION = 1
 MAX_HISTORY_TURNS = 20
 MAX_ITERATIONS_ERROR = (
@@ -88,7 +94,7 @@ class SessionState(BaseModel):
 
 
 class FractalSession:
-    """Workspace-local Fractal session state."""
+    """Workspace-scoped Fractal session state stored under global state."""
 
     def __init__(
         self, state: SessionState | None = None, *, session_id: str | None = None
@@ -426,8 +432,38 @@ def list_sessions(workspace_path: str | Path) -> list[SessionInfo]:
     return [info for _, info in entries]
 
 
+def default_state_dir(
+    *,
+    env: Mapping[str, str] | None = None,
+    home: str | Path | None = None,
+) -> Path:
+    environment = os.environ if env is None else env
+    state_home = environment.get(ENV_STATE_HOME)
+    if state_home:
+        return Path(state_home).expanduser()
+    xdg_state_home = environment.get("XDG_STATE_HOME")
+    if xdg_state_home:
+        return Path(xdg_state_home).expanduser() / STATE_DIR
+    home_path = Path.home() if home is None else Path(home).expanduser()
+    return home_path / ".local" / "state" / STATE_DIR
+
+
+def workspace_key(workspace_path: str | Path) -> str:
+    resolved = Path(workspace_path).expanduser().resolve()
+    slug_source = "-".join(part for part in resolved.parts if part != resolved.anchor)
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", slug_source).strip("-._")
+    if not slug:
+        slug = "workspace"
+    digest = hashlib.sha256(str(resolved).encode("utf-8")).hexdigest()[:16]
+    return f"{slug[:80]}--{digest}"
+
+
+def workspace_state_dir(workspace_path: str | Path) -> Path:
+    return default_state_dir() / WORKSPACES_DIR / workspace_key(workspace_path)
+
+
 def sessions_dir_path(workspace_path: str | Path) -> Path:
-    return Path(workspace_path) / SESSION_DIR / SESSIONS_DIR
+    return workspace_state_dir(workspace_path) / SESSIONS_DIR
 
 
 def session_path(workspace_path: str | Path, session_id: str) -> Path:

@@ -51,7 +51,7 @@ After each turn Fractal writes to stderr: iterations, wall time, tokens in/out,
 current RLM context size, billed cost, and changed files. Because the RLM loop
 re-summarizes between turns, "context" is the prompt size of the latest
 main-LM call rather than a cumulative count. `/usage` reports session totals,
-which persist in `.fractal/sessions/<session-id>.json` and survive `--resume`.
+which persist in the global state directory under the current workspace key and survive `--resume`.
 
 ## CI patterns
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 
@@ -33,3 +35,11 @@ def _stub_provider_connectivity(monkeypatch: pytest.MonkeyPatch) -> None:
         raise urllib.error.URLError("network disabled in tests")
 
     monkeypatch.setattr("fractal.connectivity._urlopen_json", _no_json)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_fractal_state_home(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("FRACTAL_STATE_HOME", str(tmp_path / "state"))

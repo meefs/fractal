@@ -107,7 +107,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--resume",
         metavar="SESSION_ID",
-        help="resume an existing workspace-local session by id",
+        help="resume an existing workspace-scoped session by id",
     )
     parser.add_argument(
         "--quiet", action="store_true", help="reserved for quieter terminal output"

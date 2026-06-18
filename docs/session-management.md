@@ -1,11 +1,14 @@
 # Session Management
 
-Fractal stores workspace-local session state under `.fractal/sessions/`.
+Fractal stores session state in the per-user global state directory, scoped by
+the current workspace path. On Unix this defaults to
+`$XDG_STATE_HOME/fractal`, or `~/.local/state/fractal` when `XDG_STATE_HOME` is
+unset. `FRACTAL_STATE_HOME` can override the Fractal state root.
 
-Each new session gets a random `session_id` and is saved as
-`.fractal/sessions/<session_id>.json`. For now the CLI starts a new session when
-it starts; later resume support can select an existing session ID and load that
-specific file.
+Each new session gets a random `session_id` and is saved under the current
+workspace key, e.g.
+`<state-root>/workspaces/<workspace-key>/sessions/<session_id>.json`. `/sessions`
+lists only sessions for the current workspace.
 
 The session has two memory layers:
 
