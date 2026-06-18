@@ -1,6 +1,6 @@
 [project]
 name = "fractal-rlm"
-version = "0.1.0"
+version = "0.1.0a1"
 description = "Interactive coding-agent CLI built around a Recursive Language Model"
 authors = [{ name = "Trampoline AI" }]
 license = { text = "MIT" }
