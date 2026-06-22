@@ -35,6 +35,11 @@ from rich.text import Text
 from rich.theme import Theme
 
 from fractal.agent.schema import FractalIterationEvent, FractalResult
+from fractal.context_meter import (
+    ContextEstimateCacheKey,
+    context_estimate_cache_key,
+    estimate_next_context_tokens,
+)
 from fractal.events import FractalRuntimeEvent
 from fractal.session import (
     SessionSummary,
@@ -502,6 +507,9 @@ class TerminalFractalApp:
         self._turn_interrupt_requested = False
         self._active_status: Status | None = None
         self._last_turn_live_iteration_count = 0
+        self._context_estimate_cache: (
+            tuple[ContextEstimateCacheKey, int | None] | None
+        ) = None
 
     async def run(self) -> None:
         previous_sigint_handler = signal.getsignal(signal.SIGINT)
@@ -672,14 +680,29 @@ class TerminalFractalApp:
             )
         )
 
-        totals = summarize_usage(self.runtime.session.summary_model)
-        tokens = totals.input_tokens + totals.output_tokens
+        tokens = self._next_context_tokens()
         if tokens:
             fragments.append(("class:bottom-toolbar.label", " · "))
             fragments.append(
-                ("class:bottom-toolbar.value", f"{_format_token_count(tokens)} tok")
+                ("class:bottom-toolbar.value", f"~{_format_token_count(tokens)} ctx")
             )
         return fragments
+
+    def _next_context_tokens(self) -> int | None:
+        try:
+            key = context_estimate_cache_key(self.runtime)
+        except Exception:
+            return None
+        if self._context_estimate_cache is not None:
+            cached_key, cached_tokens = self._context_estimate_cache
+            if cached_key == key:
+                return cached_tokens
+        try:
+            tokens = estimate_next_context_tokens(self.runtime)
+        except Exception:
+            tokens = None
+        self._context_estimate_cache = (key, tokens)
+        return tokens
 
     def _show_interrupting_status(self) -> None:
         status = self._active_status

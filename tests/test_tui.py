@@ -1254,7 +1254,10 @@ def test_turn_footer_without_trace_is_plain_complete() -> None:
     assert footer == "✓ complete"
 
 
-def test_bottom_toolbar_omits_accumulated_cost(tmp_path: Path) -> None:
+def test_bottom_toolbar_shows_context_estimate_not_accumulated_usage(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     from fractal.session import TurnUsage
     from fractal.tui import TerminalFractalApp
 
@@ -1268,12 +1271,60 @@ def test_bottom_toolbar_omits_accumulated_cost(tmp_path: Path) -> None:
         output_tokens=400,
         cost=0.0413,
     )
+    monkeypatch.setattr(
+        "fractal.tui.app.estimate_next_context_tokens",
+        lambda runtime: 7421,
+    )
     app = TerminalFractalApp(runtime)
 
     toolbar = "".join(fragment for _, fragment in app._bottom_toolbar_fragments())
 
-    assert "8.6k tok" in toolbar
+    assert "~7.4k ctx" in toolbar
+    assert "8.6k tok" not in toolbar
     assert "$0.04" not in toolbar
+
+
+def test_bottom_toolbar_omits_context_when_estimate_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from fractal.tui import TerminalFractalApp
+
+    def fail(runtime: object) -> int:
+        raise RuntimeError("cannot estimate")
+
+    monkeypatch.setattr("fractal.tui.app.estimate_next_context_tokens", fail)
+    runtime = FakeRuntime(tmp_path)
+    app = TerminalFractalApp(runtime)
+
+    toolbar = "".join(fragment for _, fragment in app._bottom_toolbar_fragments())
+
+    assert "model gpt-5.5" in toolbar
+    assert "verbose off" in toolbar
+    assert "ctx" not in toolbar
+
+
+def test_bottom_toolbar_caches_context_estimate(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from fractal.tui import TerminalFractalApp
+
+    calls = 0
+
+    def estimate(runtime: object) -> int:
+        nonlocal calls
+        calls += 1
+        return 7421
+
+    monkeypatch.setattr("fractal.tui.app.estimate_next_context_tokens", estimate)
+    runtime = FakeRuntime(tmp_path)
+    app = TerminalFractalApp(runtime)
+
+    app._bottom_toolbar_fragments()
+    app._bottom_toolbar_fragments()
+
+    assert calls == 1
 
 
 def test_terminal_tui_help_command_lists_commands(tmp_path: Path) -> None:
