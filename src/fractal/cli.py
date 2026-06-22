@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from .config_commands import run_config_command
+from .errors import user_facing_error
 from .runtime_lms import resolve_runtime_lms
 
 MAX_STDIN_BYTES = 10 * 1024 * 1024
@@ -254,30 +255,31 @@ def run_tui(args: argparse.Namespace, notifier: Any | None = None) -> int:
     workspace = args.workspace.resolve()
     display_verbose = _effective_verbose(args, lm_config)
     reuse_sandbox = not args.ephemeral
-    if args.fresh and reuse_sandbox:
-        from .agent.service import remove_sandbox_for
-
-        remove_sandbox_for(workspace, args.include)
-    runtime = FractalRuntime.create(
-        workspace_path=workspace,
-        included_paths=args.include,
-        lm=lm_config.lm,
-        sub_lm=lm_config.sub_lm,
-        max_iterations=_effective_max_iterations(args, lm_config),
-        verbose=False,
-        debug=args.debug,
-        session_id=args.resume,
-        provider_selection=lm_config.provider_selection,
-        sub_lm_follows_main=lm_config.sub_lm_follows_main,
-        sub_model=lm_config.sub_model,
-        reuse_sandbox=reuse_sandbox,
-    )
     status_text = (
         "[dim]starting sandbox...[/dim]"
         if args.ephemeral
         else "[dim]starting sandbox (reusing hot sandbox if available)...[/dim]"
     )
+    runtime = None
     try:
+        if args.fresh and reuse_sandbox:
+            from .agent.service import remove_sandbox_for
+
+            remove_sandbox_for(workspace, args.include)
+        runtime = FractalRuntime.create(
+            workspace_path=workspace,
+            included_paths=args.include,
+            lm=lm_config.lm,
+            sub_lm=lm_config.sub_lm,
+            max_iterations=_effective_max_iterations(args, lm_config),
+            verbose=False,
+            debug=args.debug,
+            session_id=args.resume,
+            provider_selection=lm_config.provider_selection,
+            sub_lm_follows_main=lm_config.sub_lm_follows_main,
+            sub_model=lm_config.sub_model,
+            reuse_sandbox=reuse_sandbox,
+        )
         with console.status(status_text, spinner="dots"):
             runtime.prewarm()
         asyncio.run(
@@ -289,20 +291,24 @@ def run_tui(args: argparse.Namespace, notifier: Any | None = None) -> int:
                 update_notice=notifier.notice() if notifier is not None else None,
             ).run()
         )
+    except Exception as exc:
+        console.print(f"fractal: {user_facing_error(exc)}", style="red")
+        return 1
     finally:
-        try:
-            with console.status(
-                "[dim]shutting down sandbox... press Ctrl-C again to force exit without cleaning up the sandbox[/dim]",
-                spinner="dots",
-            ):
-                runtime.close()
-        except KeyboardInterrupt:
-            console.print(
-                "sandbox shutdown interrupted; a sandbox may still be running. "
-                "Run `sbx ls` and `sbx rm --force <name>` to clean it up.",
-                style="yellow",
-            )
-            return 130
+        if runtime is not None:
+            try:
+                with console.status(
+                    "[dim]shutting down sandbox... press Ctrl-C again to force exit without cleaning up the sandbox[/dim]",
+                    spinner="dots",
+                ):
+                    runtime.close()
+            except KeyboardInterrupt:
+                console.print(
+                    "sandbox shutdown interrupted; a sandbox may still be running. "
+                    "Run `sbx ls` and `sbx rm --force <name>` to clean it up.",
+                    style="yellow",
+                )
+                return 130
     return 0
 
 
@@ -379,15 +385,16 @@ def run_non_interactive(
             reuse_sandbox=reuse_sandbox,
         )
     except Exception as exc:
+        error = user_facing_error(exc)
         if args.json:
             _emit_headless_json(
                 stdout,
                 HeadlessResult(
-                    workspace=str(workspace), status="failed", error=str(exc)
+                    workspace=str(workspace), status="failed", error=error
                 ),
             )
         else:
-            print(f"fractal: {exc}", file=stderr)
+            print(f"fractal: {error}", file=stderr)
         return 1
 
     try:
@@ -479,6 +486,7 @@ def _run_non_interactive_turn(
             print("fractal: interrupted", file=stderr)
         return 130
     except Exception as exc:
+        error = user_facing_error(exc)
         if args.json:
             _emit_headless_json(
                 stdout,
@@ -486,11 +494,11 @@ def _run_non_interactive_turn(
                     session_id=runtime.session_id,
                     workspace=str(runtime.workspace_path),
                     status="failed",
-                    error=str(exc),
+                    error=error,
                 ),
             )
         else:
-            print(f"fractal: failed: {exc}", file=stderr)
+            print(f"fractal: failed: {error}", file=stderr)
         return 1
 
     if (

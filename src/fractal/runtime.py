@@ -11,6 +11,7 @@ from predict_rlm.trace import extract_trace_from_exc
 
 from .agent.schema import FractalIterationEvent, FractalResult
 from .agent.service import FractalAgent, create_sbx_interpreter
+from .errors import user_facing_error
 from .events import FractalRuntimeEvent, RuntimeEventTracker
 from .lm_types import RuntimeLM
 from .providers import ProviderSelection
@@ -285,7 +286,7 @@ class FractalRuntime:
             # can decide how loudly to surface the exception after it is saved.
             self.session.add_agent_turn(
                 status="failed",
-                error=str(exc),
+                error=user_facing_error(exc),
                 trace=_extract_run_trace(exc),
                 files_read=runtime_events.files_read,
                 commands_run=runtime_events.commands_run,

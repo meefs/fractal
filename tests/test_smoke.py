@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -576,6 +577,86 @@ def test_run_tui_shows_shutdown_status_and_closes_runtime(
         "close",
         "status_exit",
     ]
+
+
+def test_run_tui_reports_sbx_auth_failure_without_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import rich.console as rich_console
+
+    import fractal.runtime as runtime_module
+    import fractal.tui as tui_module
+    from fractal.cli import run_tui
+
+    events: list[str] = []
+
+    class FakeStatus:
+        def __enter__(self) -> None:
+            events.append("status_enter")
+
+        def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+            events.append("status_exit")
+
+    class FakeConsole:
+        def print(self, message: str, *, style: str | None = None) -> None:
+            events.append(f"print:{message}:{style}")
+
+        def status(self, message: str, *, spinner: str) -> FakeStatus:
+            events.append(f"status:{message}:{spinner}")
+            return FakeStatus()
+
+    class FakeRuntime:
+        def prewarm(self) -> None:
+            called_process_error = subprocess.CalledProcessError(
+                1,
+                ["sbx", "create", "shell", "/tmp/sbx", "/workspace"],
+                stderr=(
+                    "ERROR: request failed: 401 Unauthorized: "
+                    "user is not authenticated to Docker\n"
+                    "no valid user session found, please sign in to Docker to proceed"
+                ),
+            )
+            raise RuntimeError("Failed to create sbx sandbox") from called_process_error
+
+        def close(self) -> None:
+            events.append("close")
+
+    class FakeFractalRuntime:
+        @classmethod
+        def create(cls, **kwargs: object) -> FakeRuntime:
+            events.append("create")
+            return FakeRuntime()
+
+    class FakeTerminalFractalApp:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            raise AssertionError("app should not start after failed prewarm")
+
+    monkeypatch.setattr(rich_console, "Console", FakeConsole)
+    monkeypatch.setattr(runtime_module, "FractalRuntime", FakeFractalRuntime)
+    monkeypatch.setattr(tui_module, "TerminalFractalApp", FakeTerminalFractalApp)
+
+    result = run_tui(
+        SimpleNamespace(
+            workspace=tmp_path,
+            include=[],
+            lm="test-lm",
+            sub_lm=None,
+            max_iterations=1,
+            debug=False,
+            resume=None,
+            verbose=False,
+            fresh=False,
+            ephemeral=False,
+        )
+    )
+
+    assert result == 1
+    assert (
+        "print:fractal: Your sbx CLI is not logged in to Docker. "
+        "Run `sbx login`, then try Fractal again.:red"
+    ) in events
+    assert "close" in events
 
 
 def test_run_tui_allows_force_exit_during_shutdown(

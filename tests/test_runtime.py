@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -203,6 +204,41 @@ def test_runtime_submit_persists_failure_before_reraising(tmp_path: Path) -> Non
     assert session.turns[-1].agent.error == "model failed"
     assert session.history[-1].status == "failed"
     assert session.history[-1].error == "model failed"
+
+
+def test_runtime_submit_persists_user_facing_sbx_auth_failure(tmp_path: Path) -> None:
+    from fractal.runtime import FractalRuntime
+    from fractal.session import FractalSession
+
+    class FailingAgent:
+        async def aforward(self, **kwargs: object) -> object:
+            called_process_error = subprocess.CalledProcessError(
+                1,
+                ["sbx", "create", "shell", "/tmp/sbx", "/workspace"],
+                stderr=(
+                    "ERROR: request failed: 401 Unauthorized: "
+                    "user is not authenticated to Docker\n"
+                    "no valid user session found, please sign in to Docker to proceed"
+                ),
+            )
+            raise RuntimeError("Failed to create sbx sandbox") from called_process_error
+
+    session = FractalSession()
+    runtime = FractalRuntime(
+        workspace_path=tmp_path,
+        session=session,
+        agent=FailingAgent(),
+    )
+
+    with pytest.raises(RuntimeError, match="Failed to create sbx sandbox"):
+        asyncio.run(runtime.submit("run tests"))
+
+    assert session.turns[-1].agent is not None
+    assert session.turns[-1].agent.error == (
+        "Your sbx CLI is not logged in to Docker. "
+        "Run `sbx login`, then try Fractal again."
+    )
+    assert session.history[-1].error == session.turns[-1].agent.error
 
 
 def test_runtime_submit_does_not_mask_failure_with_malformed_trace(
