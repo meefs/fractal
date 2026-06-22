@@ -561,7 +561,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "predict-rlm", extras = ["sbx"], specifier = ">=0.7.0a5" },
+    { name = "predict-rlm", extras = ["sbx"], specifier = ">=0.7.0" },
     { name = "prompt-toolkit", specifier = ">=3.0" },
     { name = "pydantic", specifier = ">=2" },
     { name = "rich", specifier = ">=13" },
@@ -1385,7 +1385,7 @@ wheels = [
 
 [[package]]
 name = "predict-rlm"
-version = "0.7.0a5"
+version = "0.7.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "deno" },
@@ -1395,9 +1395,9 @@ dependencies = [
     { name = "pygments" },
     { name = "tenacity" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d5/b7/ba1bcc1e3d23f3eeba9db786859ca3c76f3622b35e20ce23c5fd2e03d6ff/predict_rlm-0.7.0a5.tar.gz", hash = "sha256:236bf69ea6c76e1060ba83359c5de7d511670ca080585aaa36547d734c426f88", size = 252670, upload-time = "2026-06-18T16:07:24.837Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/01/84/8bd6886c3f4610390840071a3124f512891faea2688e69e6ac9d5a94028d/predict_rlm-0.7.0.tar.gz", hash = "sha256:e132b0507e58f4d46216523d5ca1e79da20105ccab2c6ac060bbea850847c045", size = 252650, upload-time = "2026-06-22T20:53:38.247Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/41/bd/5d03dbc6200de257b933dfb63708c0d839ef9fc6067d8e2c12efcd1265b3/predict_rlm-0.7.0a5-py3-none-any.whl", hash = "sha256:565c5cf0fa139f18d1a3d9d80cf308856f7d8f4e48be6a8db88fc8261e5af91d", size = 281958, upload-time = "2026-06-18T16:07:22.888Z" },
+    { url = "https://files.pythonhosted.org/packages/79/ea/42cb45f898fda8bf5a8e5efaf8c8c7802ed696ed1f6e5b3b4cbf763760a0/predict_rlm-0.7.0-py3-none-any.whl", hash = "sha256:30350a53a9b9acf7eddbb8ac1effec4d609dc4fd31a1e440994da9cbf793c372", size = 281937, upload-time = "2026-06-22T20:53:36.828Z" },
 ]
 
 [package.optional-dependencies]
