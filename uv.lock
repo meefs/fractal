@@ -542,7 +542,7 @@ wheels = [
 
 [[package]]
 name = "fractal-rlm"
-version = "0.1.0a1"
+version = "0.1.1a1"
 source = { editable = "." }
 dependencies = [
     { name = "predict-rlm", extra = ["sbx"] },
