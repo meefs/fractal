@@ -31,6 +31,30 @@ step()  { printf '%s\n' "${DIM}  -> $*${RESET}"; }
 
 has() { command -v "$1" >/dev/null 2>&1; }
 
+MIN_SBX_VERSION="0.33.0"
+
+extract_sbx_version() {
+    sbx --version 2>/dev/null \
+        | sed -n 's/.*\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' \
+        | head -n 1
+}
+
+version_ge() {
+    awk -v found="$1" -v required="$2" '
+        BEGIN {
+            split(found, f, ".")
+            split(required, r, ".")
+            for (i = 1; i <= 3; i++) {
+                fv = f[i] + 0
+                rv = r[i] + 0
+                if (fv > rv) exit 0
+                if (fv < rv) exit 1
+            }
+            exit 0
+        }
+    '
+}
+
 # --- 1. ensure uv -----------------------------------------------------------
 ensure_uv() {
     if has uv; then
@@ -74,7 +98,16 @@ check_prereqs() {
     info "checking runtime prerequisites..."
 
     if has sbx; then
-        step "${GREEN}sbx CLI found${RESET} (run 'sbx login' if you haven't)"
+        _sbx_version="$(extract_sbx_version || true)"
+        if [ -z "$_sbx_version" ]; then
+            warn "sbx CLI found, but couldn't determine its version. Fractal requires sbx v$MIN_SBX_VERSION+."
+            printf '         Upgrade with: brew upgrade docker/tap/sbx\n' >&2
+        elif version_ge "$_sbx_version" "$MIN_SBX_VERSION"; then
+            step "${GREEN}sbx CLI found${RESET} ($_sbx_version; run 'sbx login' if you haven't)"
+        else
+            warn "sbx CLI version $_sbx_version is too old. Fractal requires sbx v$MIN_SBX_VERSION+."
+            printf '         Upgrade with: brew upgrade docker/tap/sbx && sbx login\n' >&2
+        fi
     else
         warn "sbx CLI not found. Install and log in:"
         printf '         brew install docker/tap/sbx && sbx login\n' >&2
