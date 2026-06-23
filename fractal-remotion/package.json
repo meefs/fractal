@@ -23,7 +23,9 @@
   "scripts": {
     "dev": "remotion studio",
     "render": "remotion render FractalRelease out/fractal-release.mp4",
+    "render:mobile": "remotion render FractalReleaseMobile out/fractal-release-mobile-4x5.mp4",
     "still": "remotion still FractalRelease out/fractal-release-frame.png --frame=180 --scale=0.5",
+    "still:mobile": "remotion still FractalReleaseMobile out/fractal-release-mobile-4x5-frame.png --frame=600 --scale=0.5",
     "build": "remotion bundle",
     "upgrade": "remotion upgrade",
     "lint": "eslint src && tsc"

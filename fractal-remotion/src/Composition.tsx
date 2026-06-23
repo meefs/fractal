@@ -65,13 +65,14 @@ const Cursor: React.FC<{ opacity: number }> = ({ opacity }) => (
 const SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧";
 
 // ---------------------------------------------------------------------------
-// Self-similar geometry: each session embeds the next one as the whole canvas
-// scaled by CHILD_SCALE, top-left pinned at T — indented in the log flow,
-// right below the "spawning sub-lm" line — so the recursion reads as session
-// output, not a floating window. P is the fixed point: T = P * (1 - scale).
+// Self-similar geometry: each session embeds the next one as a tiny copy of the
+// whole canvas, top-left pinned at T. The child is a recursion target rather
+// than a readable mini-terminal, so it does not cover the parent log text.
+// P is the fixed point: T = P * (1 - scale).
 // ---------------------------------------------------------------------------
-const CHILD_SCALE = 0.38;
-const T = { x: 82, y: 568 };
+const CHILD_SCALE = 0.04;
+const CHILD_IDLE_OPACITY = 0.32;
+const T = { x: 92, y: 660 };
 const P = { x: T.x / (1 - CHILD_SCALE), y: T.y / (1 - CHILD_SCALE) };
 
 // The cold open owns frames 0-74; the whole session timeline shifts by this.
@@ -114,79 +115,122 @@ type Script = {
 // Depth 0 fans the big task out; every level below works one shard of it.
 const SCRIPTS: Script[] = [
   {
-    prompt: "inspect this 123 page contract and extract key points",
+    prompt:
+      "go through this 123 page contract, build a complete timeline, and set reminders for the deadlines",
     before: [
       { at: 54, text: "RLM turn 1/30 (ok)", color: C.violet },
-      { at: 60, text: "reasoning: 123 pages won't fit one context — split it", indent: 1 },
-      { at: 66, text: "python: fanning out one sub-lm per page", indent: 1 },
+      {
+        at: 60,
+        text: "reasoning: 123 pages won't fit one context — split it",
+        indent: 1,
+      },
+      { at: 66, text: "python:", indent: 1 },
     ],
     code: [
       {
         at: 70,
         segments: [
-          { text: "pages = load(", color: PY.plain },
-          { text: '"contract.pdf"', color: PY.str },
-          { text: ").pages", color: PY.plain },
+          { text: "class ", color: PY.kw },
+          { text: "DatedItem(BaseModel):", color: PY.plain },
         ],
       },
       {
         at: 78,
+        segments: [{ text: "    date: datetime.date", color: PY.plain }],
+      },
+      {
+        at: 86,
+        segments: [{ text: "    description: str", color: PY.plain }],
+      },
+      {
+        at: 94,
         segments: [
+          { text: "results = ", color: PY.plain },
+          { text: "await ", color: PY.kw },
+          { text: "asyncio.gather(*[predict(page) ", color: PY.plain },
           { text: "for ", color: PY.kw },
           { text: "page ", color: PY.plain },
           { text: "in ", color: PY.kw },
-          { text: "pages:", color: PY.plain },
-        ],
-      },
-      {
-        at: 86,
-        segments: [
-          { text: "    spawn(", color: PY.plain },
-          { text: '"extract key points"', color: PY.str },
-          { text: ", doc=page)", color: PY.plain },
+          { text: "doc])", color: PY.plain },
         ],
       },
     ],
     after: [
-      { at: 94, text: "123 sub-lms queued", indent: 1, color: C.lavender },
-      { at: 100, text: "RLM turn 2/30 (ok)", color: C.violet },
-      { at: 106, text: "sub-lm 1/123 · page 1", indent: 1, color: C.text, bullet: "↳ " },
+      {
+        at: 102,
+        text: "sub-lm 47/123 · page 47",
+        indent: 1,
+        color: C.text,
+        bullet: "↳ ",
+      },
+      {
+        at: 108,
+        text: "reasoning: read the dates on the page, label what each governs",
+        indent: 2,
+      },
+      {
+        at: 114,
+        text: "2 items · 2026-04-01 renewal notice · 2026-06-30 term end",
+        indent: 2,
+        color: C.lavender,
+      },
     ],
   },
   {
-    prompt: "here is one page, extract key points",
+    prompt: "page 47: extract dated items",
     before: [
       { at: 54, text: "RLM turn 1/30 (ok)", color: C.violet },
-      { at: 60, text: "reasoning: scan the clauses, pull terms and obligations", indent: 1 },
-      { at: 66, text: "python: collecting key points", indent: 1 },
+      {
+        at: 60,
+        text: "reasoning: read the dates on the page, label what each governs",
+        indent: 1,
+      },
+      { at: 66, text: "python:", indent: 1 },
     ],
     code: [
       {
         at: 70,
-        segments: [{ text: "clauses = parse(page).clauses", color: PY.plain }],
+        segments: [{ text: "items = [", color: PY.plain }],
       },
       {
         at: 78,
         segments: [
-          { text: "points = [summarize(c) ", color: PY.plain },
-          { text: "for ", color: PY.kw },
-          { text: "c ", color: PY.plain },
-          { text: "in ", color: PY.kw },
-          { text: "clauses]", color: PY.plain },
+          { text: "    DatedItem(", color: PY.plain },
+          { text: '"2026-04-01"', color: PY.str },
+          { text: ", ", color: PY.punct },
+          { text: '"renewal notice"', color: PY.str },
+          { text: "),", color: PY.plain },
         ],
       },
       {
         at: 86,
         segments: [
-          { text: "emit", color: PY.fn },
-          { text: "(points)", color: PY.plain },
+          { text: "    DatedItem(", color: PY.plain },
+          { text: '"2026-06-30"', color: PY.str },
+          { text: ", ", color: PY.punct },
+          { text: '"term end"', color: PY.str },
+          { text: "),", color: PY.plain },
         ],
+      },
+      {
+        at: 94,
+        segments: [{ text: "]", color: PY.plain }],
       },
     ],
     after: [
-      { at: 94, text: "3 key points · payment · term · liability", indent: 1, color: C.lavender },
-      { at: 100, text: "RLM turn 2/30 (ok)", color: C.violet },
-      { at: 106, text: "returning key points to parent", indent: 1, color: C.text, bullet: "↳ " },
+      {
+        at: 102,
+        text: "2 items · 2026-04-01 renewal notice · 2026-06-30 term end",
+        indent: 1,
+        color: C.lavender,
+      },
+      {
+        at: 108,
+        text: "returning items to parent",
+        indent: 1,
+        color: C.text,
+        bullet: "↳ ",
+      },
     ],
   },
 ];
@@ -412,7 +456,14 @@ const Session: React.FC<{ depth: number; offset: number; appear: number }> = ({
               inset: 0,
               transform: `scale(${CHILD_SCALE})`,
               transformOrigin: `${P.x}px ${P.y}px`,
-              opacity: on(frame, offset + CHILD_AT),
+              opacity:
+                on(frame, offset + CHILD_AT) *
+                interpolate(
+                  frame,
+                  [ZOOM_START - 8, ZOOM_END - 8],
+                  [CHILD_IDLE_OPACITY, 1],
+                  clamp,
+                ),
             }}
           >
             <Session
@@ -473,6 +524,8 @@ const ZoomStage: React.FC = () => {
 // The outro takes its time: logo, wordmark, tagline, and install command
 // arrive one after another with long fades, so each gets read on its own.
 const OUTRO_AT = 408;
+const OUTRO_TAGLINE_FADE = 56;
+const INSTALL_COMMAND = "curl -LsSf https://fractal.trampoline.ai/install.sh | sh";
 
 const Outro: React.FC = () => {
   const frame = useCurrentFrame();
@@ -480,8 +533,8 @@ const Outro: React.FC = () => {
     ...clamp,
     easing: easeOut,
   });
-  const install = typed("uv tool install fractal", frame, OUTRO_AT + 120, 0.6);
-  const installVisible = frame >= OUTRO_AT + 112;
+  const install = typed(INSTALL_COMMAND, frame, OUTRO_AT + 144, 1.35);
+  const installVisible = frame >= OUTRO_AT + 136;
 
   return (
     <AbsoluteFill
@@ -489,16 +542,16 @@ const Outro: React.FC = () => {
         alignItems: "center",
         justifyContent: "center",
         opacity: fadeIn(frame, OUTRO_AT, 40),
-        transform: `translateY(${rise}px)`,
+        transform: `translateY(${rise - 18}px)`,
       }}
     >
       <Img
         src={staticFile("logo-mark.png")}
-        style={{ width: 290, height: 290, marginBottom: 4 }}
+        style={{ width: 430, height: 430, marginBottom: 4 }}
       />
       <div
         style={{
-          fontSize: 108,
+          fontSize: 156,
           fontWeight: 700,
           color: C.text,
           lineHeight: 1,
@@ -511,20 +564,31 @@ const Outro: React.FC = () => {
       <div
         style={{
           marginTop: 22,
-          fontSize: 30,
+          fontSize: 42,
           color: C.dim,
-          opacity: fadeIn(frame, OUTRO_AT + 62, 36),
+          opacity: fadeIn(frame, OUTRO_AT + 62, OUTRO_TAGLINE_FADE),
         }}
       >
         the recursive language model cli agent
       </div>
       <div
         style={{
-          marginTop: 52,
-          fontSize: 32,
+          marginTop: 20,
+          fontSize: 40,
+          color: C.lavender,
+          opacity: fadeIn(frame, OUTRO_AT + 98, OUTRO_TAGLINE_FADE),
+        }}
+      >
+        A terminal agent that{" "}
+        <span style={{ color: C.text, fontStyle: "italic" }}>is</span> an RLM
+      </div>
+      <div
+        style={{
+          marginTop: 44,
+          fontSize: 42,
           color: C.lavender,
           whiteSpace: "pre",
-          opacity: fadeIn(frame, OUTRO_AT + 106, 24),
+          opacity: fadeIn(frame, OUTRO_AT + 132, 24),
         }}
       >
         <span style={{ color: C.accent }}>$ </span>
@@ -541,29 +605,175 @@ const Outro: React.FC = () => {
           opacity: fadeIn(frame, OUTRO_AT + 150, 36),
         }}
       >
-        <span style={{ fontSize: 22, color: C.faint }}>by</span>
+        <span style={{ fontSize: 26, color: C.faint }}>by</span>
         <Img
           src={staticFile("trampoline.svg")}
-          style={{ height: 26, opacity: 0.85 }}
+          style={{ height: 32, opacity: 0.85 }}
         />
       </div>
     </AbsoluteFill>
   );
 };
 
+const ReleaseBackground: React.FC = () => (
+  <AbsoluteFill
+    style={{
+      background:
+        "radial-gradient(ellipse at 50% 42%, rgba(124, 58, 237, 0.10), transparent 62%), radial-gradient(ellipse at 50% 110%, rgba(0, 0, 0, 0.45), transparent 60%)",
+    }}
+  />
+);
+
 export const FractalRelease: React.FC = () => {
   return (
     <AbsoluteFill style={{ background: BG, fontFamily: MONO }}>
       {/* one quiet vignette, nothing else */}
-      <AbsoluteFill
-        style={{
-          background:
-            "radial-gradient(ellipse at 50% 42%, rgba(124, 58, 237, 0.10), transparent 62%), radial-gradient(ellipse at 50% 110%, rgba(0, 0, 0, 0.45), transparent 60%)",
-        }}
-      />
+      <ReleaseBackground />
       <ZoomStage />
       <ColdOpen />
       <Outro />
+    </AbsoluteFill>
+  );
+};
+
+const MobileStageWindow: React.FC = () => {
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: 0,
+        top: 180,
+        width: 1920,
+        height: 1080,
+        transform: "scale(0.68)",
+        transformOrigin: "left top",
+      }}
+    >
+      <AbsoluteFill style={{ background: BG, fontFamily: MONO }}>
+        <ReleaseBackground />
+        <ZoomStage />
+        <ColdOpen />
+      </AbsoluteFill>
+    </div>
+  );
+};
+
+const MobileOutro: React.FC = () => {
+  const frame = useCurrentFrame();
+  const rise = interpolate(frame, [OUTRO_AT, OUTRO_AT + 70], [34, 0], {
+    ...clamp,
+    easing: easeOut,
+  });
+  const installLine1 = typed("curl -LsSf", frame, OUTRO_AT + 144, 1.35);
+  const installLine2 = typed(
+    "https://fractal.trampoline.ai/install.sh | sh",
+    frame,
+    OUTRO_AT + 150,
+    2,
+  );
+  const line2Visible = frame >= OUTRO_AT + 146;
+
+  return (
+    <AbsoluteFill
+      style={{
+        alignItems: "center",
+        justifyContent: "center",
+        opacity: fadeIn(frame, OUTRO_AT, 40),
+        transform: `translateY(${rise - 8}px)`,
+      }}
+    >
+      <Img
+        src={staticFile("logo-mark.png")}
+        style={{ width: 460, height: 460, marginBottom: 6 }}
+      />
+      <div
+        style={{
+          fontSize: 150,
+          fontWeight: 700,
+          color: C.text,
+          lineHeight: 1,
+          letterSpacing: -2,
+          opacity: fadeIn(frame, OUTRO_AT + 30, 36),
+        }}
+      >
+        fractal
+      </div>
+      <div
+        style={{
+          marginTop: 28,
+          fontSize: 38,
+          color: C.dim,
+          opacity: fadeIn(frame, OUTRO_AT + 62, OUTRO_TAGLINE_FADE),
+        }}
+      >
+        the recursive language model cli agent
+      </div>
+      <div
+        style={{
+          marginTop: 22,
+          fontSize: 38,
+          color: C.lavender,
+          opacity: fadeIn(frame, OUTRO_AT + 98, OUTRO_TAGLINE_FADE),
+        }}
+      >
+        A terminal agent that{" "}
+        <span style={{ color: C.text, fontStyle: "italic" }}>is</span> an RLM
+      </div>
+      <div
+        style={{
+          marginTop: 62,
+          fontSize: 36,
+          lineHeight: 1.45,
+          color: C.lavender,
+          whiteSpace: "pre",
+          textAlign: "left",
+          opacity: fadeIn(frame, OUTRO_AT + 132, 24),
+        }}
+      >
+        <div>
+          <span style={{ color: C.accent }}>$ </span>
+          {installLine1}
+        </div>
+        <div>
+          <span style={{ color: C.accent, opacity: line2Visible ? 1 : 0 }}>
+            {"  "}
+          </span>
+          {installLine2}
+          <Cursor opacity={line2Visible ? blink(frame) : 0} />
+        </div>
+      </div>
+      <div
+        style={{
+          position: "absolute",
+          bottom: 72,
+          display: "flex",
+          alignItems: "center",
+          gap: 14,
+          opacity: fadeIn(frame, OUTRO_AT + 150, 36),
+        }}
+      >
+        <span style={{ fontSize: 26, color: C.faint }}>by</span>
+        <Img
+          src={staticFile("trampoline.svg")}
+          style={{ height: 32, opacity: 0.85 }}
+        />
+      </div>
+    </AbsoluteFill>
+  );
+};
+
+export const FractalReleaseMobile: React.FC = () => {
+  return (
+    <AbsoluteFill
+      style={{
+        background: BG,
+        fontFamily: MONO,
+        overflow: "hidden",
+      }}
+    >
+      <ReleaseBackground />
+      <MobileStageWindow />
+      <MobileOutro />
     </AbsoluteFill>
   );
 };
