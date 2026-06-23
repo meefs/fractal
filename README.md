@@ -52,7 +52,7 @@ drop into any project and run `fractal`.
 
 - **Python 3.11+**.
 - **[uv](https://docs.astral.sh/uv/)** to install and run Fractal.
-- **The `sbx` CLI, logged in.** Fractal uses predict-rlm's `sbx`
+- **[sbx](https://docs.docker.com/ai/sandboxes/) v0.33.0+, logged in.** Fractal uses predict-rlm's `sbx`
   backend for sandboxed code execution:
 
   ```bash
