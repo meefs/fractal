@@ -63,6 +63,7 @@ drop into any project and run `fractal`.
   If `sbx` is not logged in, the first turn fails. You
   can verify the rest of your setup (provider, model, auth) ahead of time with
   `fractal config status`.
+  > We've noticed some bugs with SBX on MacOS <= 15, so if you are having trouble with it, updating your MacOS might help. 
 - **A model provider.** One of the providers in the
   [configuration table](#configuration), with its API key available (or
   `codex login` for `openai-codex`, or a local Ollama server). Setup walks you
