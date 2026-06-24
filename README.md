@@ -52,17 +52,23 @@ drop into any project and run `fractal`.
 
 - **Python 3.11+**.
 - **[uv](https://docs.astral.sh/uv/)** to install and run Fractal.
-- **[sbx](https://docs.docker.com/ai/sandboxes/) v0.33.0+, logged in.** Fractal uses predict-rlm's `sbx`
+- **[sbx](https://docs.docker.com/ai/sandboxes/) v0.33.0+, logged in, with a default network policy.** Fractal uses predict-rlm's `sbx`
   backend for sandboxed code execution:
 
   ```bash
   brew install docker/tap/sbx
   sbx login
+  sbx policy set-default balanced   # required: sbx refuses to create sandboxes without one
   ```
 
-  If `sbx` is not logged in, the first turn fails. You
-  can verify the rest of your setup (provider, model, auth) ahead of time with
-  `fractal config status`.
+  If `sbx` is not logged in, or no default network policy is set, the first turn
+  fails (sbx rejects `sbx create` with "default network policy has not been
+  configured"). You can verify the rest of your setup (provider, model, auth)
+  ahead of time with `fractal config status`.
+
+  > The very first run downloads the sandbox container image, which can take
+  > several minutes. If it appears to stall, pre-pull it once with
+  > `sbx create shell /tmp/_warm --name warm --template docker.io/docker/sandbox-templates:shell && sbx rm --force warm`.
   > We've noticed some bugs with SBX on MacOS <= 15, so if you are having trouble with it, updating your MacOS might help. 
 - **A model provider.** One of the providers in the
   [configuration table](#configuration), with its API key available (or

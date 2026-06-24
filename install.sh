@@ -103,14 +103,15 @@ check_prereqs() {
             warn "sbx CLI found, but couldn't determine its version. Fractal requires sbx v$MIN_SBX_VERSION+."
             printf '         Upgrade with: brew upgrade docker/tap/sbx\n' >&2
         elif version_ge "$_sbx_version" "$MIN_SBX_VERSION"; then
-            step "${GREEN}sbx CLI found${RESET} ($_sbx_version; run 'sbx login' if you haven't)"
+            step "${GREEN}sbx CLI found${RESET} ($_sbx_version)"
+            step "if you haven't yet: ${BOLD}sbx login${RESET} && ${BOLD}sbx policy set-default balanced${RESET}"
         else
             warn "sbx CLI version $_sbx_version is too old. Fractal requires sbx v$MIN_SBX_VERSION+."
-            printf '         Upgrade with: brew upgrade docker/tap/sbx && sbx login\n' >&2
+            printf '         Upgrade with: brew upgrade docker/tap/sbx && sbx login && sbx policy set-default balanced\n' >&2
         fi
     else
-        warn "sbx CLI not found. Install and log in:"
-        printf '         brew install docker/tap/sbx && sbx login\n' >&2
+        warn "sbx CLI not found. Install, log in, and set a default network policy:"
+        printf '         brew install docker/tap/sbx && sbx login && sbx policy set-default balanced\n' >&2
     fi
 }
 
