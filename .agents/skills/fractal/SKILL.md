@@ -30,7 +30,8 @@ shell or re-source your profile.
 Fractal also needs, at runtime:
 
 - **Docker**, running — every turn executes in a Docker sandbox.
-- **The `sbx` CLI, logged in** — `brew install docker/tap/sbx && sbx login`.
+- **The `sbx` CLI v0.33.0+, logged in, with a default network policy** —
+  `brew install docker/tap/sbx && sbx login && sbx policy set-default balanced`.
 - **A configured model provider** — verify with the [Preflight](#preflight-do-once-per-machinesession) checks below.
 
 ## When to reach for it
@@ -64,11 +65,35 @@ fractal -p "Trace how a request flows through this service, end to end" --worksp
 
 ```bash
 docker info >/dev/null || echo "start Docker first"   # sandbox needs the daemon
+sbx version                                            # must be v0.33.0+
+sbx diagnose                                           # login/install health
+sbx policy set-default balanced                        # required before sbx create
+sbx template ls                                        # empty output means first startup pulls the template image
 fractal config status                                  # provider/model/auth ok?
 ```
 
 If config is missing, `fractal config setup` is interactive — in automation use
 `fractal config set ...` or the `FRACTAL_PROVIDER` / `FRACTAL_MODEL` env vars.
+
+## Troubleshooting Fractal startup
+
+When a user asks you to troubleshoot a Fractal install or startup failure, check
+the local prerequisites before trying a `fractal -p` run. If Fractal seems to
+stall on startup, or reaches a timeout, most failures are bad `sbx` setup:
+
+1. Run `sbx version`. Fractal requires `sbx` v0.33.0 or newer. If the command is
+   missing or too old, install or upgrade with `brew install docker/tap/sbx` or
+   `brew upgrade docker/tap/sbx`.
+2. Run `sbx diagnose`. If it reports an auth problem, ask the user to run
+   `sbx login` in their terminal.
+3. Run `sbx policy set-default balanced`. Fractal needs a default network policy
+   before `sbx create`; without one, first launch can open browser login and then
+   appear to hang while `sbx` waits for an interactive policy choice.
+4. Run `sbx template ls`. If no templates appear, the sandbox template image has
+   not been pulled yet, so the first Fractal startup can take longer while `sbx`
+   downloads it.
+5. Run `fractal config status` after `sbx` is healthy to verify provider, model,
+   and auth configuration.
 
 ## Output contract
 

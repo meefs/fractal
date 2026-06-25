@@ -50,6 +50,8 @@ drop into any project and run `fractal`.
 
 ## Requirements
 
+Fractal is in early alpha and has currently only been tested on macOS.
+
 - **Python 3.11+**.
 - **[uv](https://docs.astral.sh/uv/)** to install and run Fractal.
 - **[sbx](https://docs.docker.com/ai/sandboxes/) v0.33.0+, logged in, with a default network policy.** Fractal uses predict-rlm's `sbx`
@@ -66,8 +68,10 @@ drop into any project and run `fractal`.
   configured"). You can verify the rest of your setup (provider, model, auth)
   ahead of time with `fractal config status`.
 
-  > The very first run downloads the sandbox container image, which can take
-  > several minutes. If it appears to stall, pre-pull it once with
+  > The very first run downloads the sandbox template image, which can take
+  > several minutes. Check whether the image has already been pulled with
+  > `sbx template ls`; if nothing appears, Fractal startup will take longer the
+  > first time. You can pre-pull it once with
   > `sbx create shell /tmp/_warm --name warm --template docker.io/docker/sandbox-templates:shell && sbx rm --force warm`.
   > We've noticed some bugs with SBX on MacOS <= 15, so if you are having trouble with it, updating your MacOS might help. 
 - **A model provider.** One of the providers in the
@@ -91,6 +95,62 @@ fractal --help
 
 Both create an isolated environment and put `fractal` on your PATH, so it is
 callable from any directory.
+
+## Troubleshooting
+
+If you use Fractal through another coding agent, first let that agent use the
+bundled **`fractal` skill** to troubleshoot your installation:
+
+```bash
+npx skills add https://github.com/Trampoline-AI/fractal/tree/main/.agents/skills/fractal
+```
+
+The skill includes the current setup checks and can run them from your project.
+
+If Fractal seems to stall on startup, or reaches a timeout, most startup
+problems come from an incomplete `sbx` setup. Check these in order:
+
+```bash
+sbx version
+```
+
+Fractal requires `sbx` v0.33.0 or newer. If `sbx` is missing or outdated, install
+or upgrade it with Homebrew:
+
+```bash
+brew install docker/tap/sbx
+brew upgrade docker/tap/sbx
+```
+
+Then verify that `sbx` is logged in and installed correctly:
+
+```bash
+sbx diagnose
+```
+
+If `sbx diagnose` reports an auth problem, run:
+
+```bash
+sbx login
+```
+
+Finally, make sure `sbx` has a default network policy:
+
+```bash
+sbx policy set-default balanced
+```
+
+Without a default network policy, a first Fractal launch can appear to stall
+after browser login because `sbx` is waiting for an interactive policy choice.
+
+You can also check whether the sandbox template image has already been pulled:
+
+```bash
+sbx template ls
+```
+
+If no templates appear, the first Fractal startup will take longer while `sbx`
+downloads the template image.
 
 ## Use it with your coding agent
 

@@ -66,6 +66,8 @@ detection, branch/worktree awareness, and optional commit generation.
 
 - Keep changes narrowly scoped. This repo is small; avoid introducing broad
   abstractions before the behavior needs them.
+- Commit messages must use a conventional prefix such as `feat:`, `fix:`,
+  `docs:`, `tests:`, `refactor:`, `chore:`, or `improv:`.
 - Fractal depends on the local editable `../predict-rlm` checkout, and we own
   that package too. If a problem is caused by a PredictRLM interface,
   serialization, sandbox, or trace limitation, call it out as a PredictRLM issue
